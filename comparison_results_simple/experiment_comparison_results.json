@@ -1,0 +1,18 @@
+[
+  {
+    "experiment": "jepa_barlow_twins",
+    "aux_loss_type": "barlow_twins",
+    "best_val_loss": Infinity,
+    "final_epoch": 0,
+    "avg_train_loss": 0.0,
+    "avg_val_loss": 0.0
+  },
+  {
+    "experiment": "jepa_vicreg",
+    "aux_loss_type": "vicreg",
+    "best_val_loss": Infinity,
+    "final_epoch": 0,
+    "avg_train_loss": 0.0,
+    "avg_val_loss": 0.0
+  }
+]

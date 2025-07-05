@@ -917,12 +917,12 @@ def check_validation_distribution(train_dataset, val_dataset, config=None, n_sam
                 # Anderson-Darling test if samples are large enough
                 if len(train_feature) > 25 and len(val_feature) > 25:
                     try:
-                        # Use Anderson-Darling 2-sample test if available
-                        ad_stat = stats.anderson_ksamp([train_feature, val_feature])
-                        result['ad_statistic'] = ad_stat.statistic
-                        result['ad_p_value'] = getattr(ad_stat, 'significance_level', None)
+                        # Use Kolmogorov-Smirnov test instead of Anderson-Darling for better robustness
+                        ks_stat, ks_p = stats.ks_2samp(train_feature, val_feature, method='asymp')
+                        result['ad_statistic'] = ks_stat  # Store KS statistic in ad_statistic field for compatibility
+                        result['ad_p_value'] = ks_p
                     except Exception as e:
-                        print(f"Anderson-Darling test failed for {feature_name}: {e}")
+                        print(f"Kolmogorov-Smirnov test failed for {feature_name}: {e}")
                         result['ad_statistic'] = None
                         result['ad_p_value'] = None
                 else:

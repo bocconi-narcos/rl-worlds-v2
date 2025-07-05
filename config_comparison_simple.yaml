@@ -1,0 +1,55 @@
+# Simplified configuration for quick auxiliary loss comparison
+# This focuses only on JEPA with VICReg vs Barlow Twins
+
+# Path to the base configuration file
+base_config_path: "config.yaml"
+
+# List of experiments to run
+experiments:
+  # Experiment 1: JEPA with Barlow Twins
+  - name: "jepa_barlow_twins"
+    aux_loss_type: "barlow_twins"
+    aux_params:
+      barlow_twins:
+        lambda_param: 0.0051
+        eps: 0.00001
+        scale_loss: 1.0
+
+  # Experiment 2: JEPA with VICReg (FIXED - reduced coefficients)
+  - name: "jepa_vicreg"
+    aux_loss_type: "vicreg"
+    aux_params:
+      vicreg:
+        sim_coeff: 1.0      # Reduced from 25.0
+        std_coeff: 1.0      # Reduced from 25.0
+        cov_coeff: 0.8      # Keep same
+        eps: 0.0001
+        proj_hidden_dim: 256  # Reduced from 512
+        proj_output_dim: 256  # Reduced from 512
+
+# Override base config for faster comparison
+base_overrides:
+  # Reduce training epochs for faster comparison
+  training:
+    num_epochs: 2  # Very short for quick testing
+  
+  # Disable other components to focus only on JEPA
+  models:
+    standard_encoder_decoder:
+      enabled: false
+    
+    reward_predictors:
+      reward_mlp:
+        enabled: false
+      larp:
+        enabled: false
+    
+    jepa:
+      decoder_training:
+        enabled: false
+
+# Comparison settings
+comparison:
+  save_detailed_logs: true
+  create_comparison_plots: false  # Disabled for simplicity
+  output_dir: "comparison_results_simple" 

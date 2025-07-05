@@ -169,10 +169,15 @@ def initialize_models(config, action_dim, action_type, device, image_h_w, input_
     vicreg_param_config = models_config.get('auxiliary_loss', {}).get('params', {}).get('vicreg', {})
     vicreg_proj_hidden_dim = vicreg_param_config.get('proj_hidden_dim')
     vicreg_proj_output_dim = vicreg_param_config.get('proj_output_dim')
-    num_params_first_layer = shared_latent_dim * vicreg_proj_hidden_dim + vicreg_proj_hidden_dim
-    num_params_second_layer = vicreg_proj_hidden_dim * vicreg_proj_output_dim + vicreg_proj_output_dim
-    total_vicreg_proj_params = num_params_first_layer + num_params_second_layer
-    print(f'{"Additional parameters in VICReg Projector:":<65}{total_vicreg_proj_params:,}')
+    
+    # Only calculate VICReg parameters if they are not None
+    if vicreg_proj_hidden_dim is not None and vicreg_proj_output_dim is not None:
+        num_params_first_layer = shared_latent_dim * vicreg_proj_hidden_dim + vicreg_proj_hidden_dim
+        num_params_second_layer = vicreg_proj_hidden_dim * vicreg_proj_output_dim + vicreg_proj_output_dim
+        total_vicreg_proj_params = num_params_first_layer + num_params_second_layer
+        print(f'{"Additional parameters in VICReg Projector:":<65}{total_vicreg_proj_params:,}')
+    else:
+        print(f'{"VICReg Projector parameters:":<65}Not configured (auxiliary loss may not be VICReg)')
 
     print('--' * 40)
     reward_mlp_enc_dec = None

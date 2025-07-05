@@ -2,6 +2,7 @@ import torch
 import os # For path joining and checking existence
 import wandb
 import time
+import sys
 
 # Import functions from the new modules in the 'src' directory
 from src.utils.config_utils import load_config
@@ -13,6 +14,14 @@ from src.optimizer_setup import initialize_optimizers
 from src.training_engine import run_training_epochs
 
 def main():
+    # Check if we want to run the comparison
+    if len(sys.argv) > 1 and sys.argv[1] == '--compare':
+        print("Running auxiliary loss comparison...")
+        # Import and run the comparison script
+        from main_comparison import main as run_comparison
+        run_comparison()
+        return
+    
     # 1. Load Configuration
     config = load_config()
 

@@ -101,6 +101,7 @@ def train_jepa_state_decoder(
         if num_batches_train == 0:
             print(f"JEPA Decoder Epoch {epoch+1} has no training data. Skipping training phase.")
         else:
+            print(f"  JEPA Decoder Epoch {epoch+1}: Training on {num_batches_train} batches...")
             for batch_idx, (s_t, a_t, _, s_t_plus_1) in enumerate(train_dataloader):
                 s_t, s_t_plus_1 = s_t.to(device), s_t_plus_1.to(device)
                 last_frame_of_next_state = s_t_plus_1[:, -1, :, :, :] 
@@ -127,6 +128,12 @@ def train_jepa_state_decoder(
                 optimizer_jepa_decoder.step()
                 epoch_loss_train += loss.item()
                 epoch_loss_mse_reconstruction_train += loss_mse_reconstruction.item()
+
+                # Progress indicator every 10% of batches or at log_interval, whichever is more frequent
+                progress_interval = max(1, min(decoder_log_interval, num_batches_train // 10))
+                if (batch_idx + 1) % progress_interval == 0:
+                    progress_pct = ((batch_idx + 1) / num_batches_train) * 100
+                    print(f"    JEPA Decoder Epoch {epoch+1}: Batch {batch_idx+1}/{num_batches_train} ({progress_pct:.1f}%) - Loss: {loss.item():.4f}")
 
                 if (batch_idx + 1) % decoder_log_interval == 0:
                     if wandb_run:
@@ -167,6 +174,8 @@ def train_jepa_state_decoder(
             epoch_loss_mse_reconstruction_val = 0
             epoch_loss_mse_diff_val = 0
             num_batches_val = len(val_dataloader)
+            
+            print(f"  JEPA Decoder Epoch {epoch+1}: Validating on {num_batches_val} batches...")
             
             # Store predictions for plotting if needed
             with torch.no_grad():

@@ -80,6 +80,8 @@ def train_reward_mlp_epoch(
             print(f"{model_name_log_prefix} Epoch {epoch+1}: No training data. Skipping.")
             continue
 
+        print(f"  {model_name_log_prefix} Epoch {epoch+1}: Training on {num_train_batches} batches...")
+        
         for batch_idx, (s_t, a_t, r_t, s_t_plus_1) in enumerate(train_dataloader):
             s_t, r_t, s_t_plus_1 = s_t.to(device), r_t.to(device).float().unsqueeze(1), s_t_plus_1.to(device)
 
@@ -118,6 +120,12 @@ def train_reward_mlp_epoch(
             loss_reward_item = loss_reward.item()
             epoch_loss_reward_mlp += loss_reward_item
 
+            # Progress indicator every 10% of batches or at log_interval, whichever is more frequent
+            progress_interval = max(1, min(log_interval_reward_mlp, num_train_batches // 10))
+            if (batch_idx + 1) % progress_interval == 0:
+                progress_pct = ((batch_idx + 1) / num_train_batches) * 100
+                print(f"    {model_name_log_prefix} Epoch {epoch+1}: Batch {batch_idx+1}/{num_train_batches} ({progress_pct:.1f}%) - Loss: {loss_reward_item:.4f}")
+
             if (batch_idx + 1) % log_interval_reward_mlp == 0:
                 if wandb_run:
                     log_data_reward_batch = {
@@ -142,6 +150,7 @@ def train_reward_mlp_epoch(
 
         if val_dataloader and len(val_dataloader) > 0:
             num_val_batches = len(val_dataloader)
+            print(f"  {model_name_log_prefix} Epoch {epoch+1}: Validating on {num_val_batches} batches...")
             with torch.no_grad():
                 for batch_idx_val, (s_t_val, a_t_val, r_t_val, s_t_plus_1_val) in enumerate(val_dataloader):
                     s_t_val, r_t_val, s_t_plus_1_val = s_t_val.to(device), r_t_val.to(device).float().unsqueeze(1), s_t_plus_1_val.to(device)

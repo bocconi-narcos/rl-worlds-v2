@@ -1,0 +1,20 @@
+AUXILIARY LOSS COMPARISON SUMMARY
+==================================================
+
+jepa_barlow_twins:
+  Auxiliary Loss: barlow_twins
+  Best Validation Loss: inf
+  Average Train Loss: 0.000000
+  Average Val Loss: 0.000000
+  Final Epoch: 0
+
+jepa_vicreg:
+  Auxiliary Loss: vicreg
+  Best Validation Loss: inf
+  Average Train Loss: 0.000000
+  Average Val Loss: 0.000000
+  Final Epoch: 0
+
+BEST PERFORMING: jepa_barlow_twins
+Auxiliary Loss: barlow_twins
+Best Validation Loss: inf

@@ -81,6 +81,8 @@ def train_validate_model_epoch(
         print(f"{model_name_log_prefix} Epoch {epoch_num}: No training data. Skipping.")
         return early_stopping_state, 0, 0
 
+    print(f"  {model_name_log_prefix} Epoch {epoch_num}: Training on {num_train_batches} batches...")
+    
     for batch_idx, (s_t, a_t, r_t, s_t_plus_1) in enumerate(train_dataloader):
         s_t, s_t_plus_1 = s_t.to(device), s_t_plus_1.to(device)
         s_t_plus_1_encoder_decoder = s_t_plus_1[:, -1, :, :, :]  # Use the last frame for encoder input
@@ -101,16 +103,57 @@ def train_validate_model_epoch(
         if model_name_log_prefix == "JEPA":
             pred_emb, target_emb_detached, online_s_t_emb, target_s_t_emb = model(s_t, a_t_processed, s_t_plus_1)
             
+            # Primary loss: JEPA prediction loss
+            loss_primary = loss_fn(pred_emb, target_emb_detached)
+            
             if aux_loss_fn is not None and use_aux_for_jepa:
-                # Use VICReg forward method with projector for all three losses
-                total_vicreg_loss, sim_loss, std_loss, cov_loss = aux_loss_fn(online_s_t_emb, target_s_t_emb)
-                current_loss_aux = total_vicreg_loss
-                total_loss = current_loss_aux
-                loss_primary = sim_loss  # For JEPA with VICReg, primary loss is the similarity (invariance) loss
+                # Handle different auxiliary loss types
+                if hasattr(aux_loss_fn, 'calculate_reg_terms') and aux_loss_name != 'vicreg':
+                    # Use calculate_reg_terms for JEPA-style regularization (Barlow Twins reg terms)
+                    aux_loss_result = aux_loss_fn.calculate_reg_terms(online_s_t_emb)
+                else:
+                    # Use forward method for full auxiliary loss (VICReg with two inputs)
+                    aux_loss_result = aux_loss_fn(online_s_t_emb, target_s_t_emb)
+                
+                # Check if it's a tuple (multiple return values) or single value
+                if isinstance(aux_loss_result, tuple):
+                    if len(aux_loss_result) == 4:
+                        # VICReg: (total_loss, sim_loss, std_loss, cov_loss)
+                        total_vicreg_loss, sim_loss, std_loss, cov_loss = aux_loss_result
+                        current_loss_aux = total_vicreg_loss
+                        total_loss = loss_primary + current_loss_aux * aux_loss_weight
+                    elif len(aux_loss_result) == 3:
+                        # Barlow Twins calculate_reg_terms: (total_loss, invariance_loss, redundancy_loss)
+                        total_barlow_loss, invariance_loss, redundancy_loss = aux_loss_result
+                        current_loss_aux = total_barlow_loss
+                        total_loss = loss_primary + current_loss_aux * aux_loss_weight
+                        # Set VICReg-specific losses to 0 for logging compatibility
+                        sim_loss = invariance_loss
+                        std_loss = torch.tensor(0.0, device=device)
+                        cov_loss = redundancy_loss
+                    else:
+                        # Fallback for other tuple returns
+                        total_vicreg_loss = aux_loss_result[0]
+                        current_loss_aux = total_vicreg_loss
+                        total_loss = loss_primary + current_loss_aux * aux_loss_weight
+                        sim_loss = total_vicreg_loss
+                        std_loss = torch.tensor(0.0, device=device)
+                        cov_loss = torch.tensor(0.0, device=device)
+                else:
+                    # Single value return (e.g., Barlow Twins forward method)
+                    total_vicreg_loss = aux_loss_result
+                    current_loss_aux = total_vicreg_loss
+                    total_loss = loss_primary + current_loss_aux * aux_loss_weight
+                    sim_loss = total_vicreg_loss
+                    std_loss = torch.tensor(0.0, device=device)
+                    cov_loss = torch.tensor(0.0, device=device)
             else:
-                # Fallback to MSE loss between predicted and target embeddings
-                loss_primary = loss_fn(pred_emb, target_emb_detached)
+                # No auxiliary loss, just primary loss
+                current_loss_aux = torch.tensor(0.0, device=device)
                 total_loss = loss_primary
+                sim_loss = torch.tensor(0.0, device=device)
+                std_loss = torch.tensor(0.0, device=device)
+                cov_loss = torch.tensor(0.0, device=device)
 
         else:  # Standard Encoder-Decoder or EncDecJEPAStyle - No auxiliary loss
             output = model(s_t, a_t_processed)
@@ -137,6 +180,132 @@ def train_validate_model_epoch(
         current_loss_aux_item = current_loss_aux.item()
         total_loss_item = total_loss.item()
         
+        # === COMPREHENSIVE JEPA DIAGNOSTICS ===
+        if model_name_log_prefix == "JEPA" and batch_idx % 10 == 0:  # Log every 10 batches
+            print(f"\n{'='*80}")
+            print(f"JEPA DIAGNOSTICS - Epoch {epoch_num}, Batch {batch_idx}")
+            print(f"{'='*80}")
+            
+            # 1. LOSS COMPONENTS ANALYSIS
+            print(f"📊 LOSS COMPONENTS:")
+            print(f"   Primary Loss (JEPA Prediction): {current_loss_primary_item:.8f}")
+            print(f"   Auxiliary Loss (VICReg): {current_loss_aux_item:.8f}")
+            print(f"   Total Loss: {total_loss_item:.8f}")
+            print(f"   Loss Ratio (aux/primary): {current_loss_aux_item/max(current_loss_primary_item, 1e-8):.2f}")
+            
+            # 2. VICReg COMPONENTS BREAKDOWN
+            if hasattr(aux_loss_fn, 'forward') and aux_loss_name == 'vicreg':
+                try:
+                    with torch.no_grad():
+                        vicreg_components = aux_loss_fn(online_s_t_emb, target_s_t_emb)
+                        if isinstance(vicreg_components, tuple) and len(vicreg_components) == 4:
+                            total_vic, sim_loss, std_loss, cov_loss = vicreg_components
+                            print(f"🔍 VICReg COMPONENTS:")
+                            print(f"   Total VICReg: {total_vic.item():.8f}")
+                            print(f"   Similarity Loss: {sim_loss.item():.8f}")
+                            print(f"   Std Loss: {std_loss.item():.8f}")
+                            print(f"   Cov Loss: {cov_loss.item():.8f}")
+                except Exception as e:
+                    print(f"   ⚠️  VICReg component analysis failed: {e}")
+            
+            # 3. EMBEDDING STATISTICS
+            print(f"🧠 EMBEDDING STATISTICS:")
+            with torch.no_grad():
+                # Online embeddings (from current state)
+                online_mean = online_s_t_emb.mean().item()
+                online_std = online_s_t_emb.std().item()
+                online_norm = torch.norm(online_s_t_emb).item()
+                print(f"   Online Embeddings - Mean: {online_mean:.6f}, Std: {online_std:.6f}, Norm: {online_norm:.6f}")
+                
+                # Target embeddings (from next state)
+                target_mean = target_s_t_emb.mean().item()
+                target_std = target_s_t_emb.std().item()
+                target_norm = torch.norm(target_s_t_emb).item()
+                print(f"   Target Embeddings - Mean: {target_mean:.6f}, Std: {target_std:.6f}, Norm: {target_norm:.6f}")
+                
+                # Predicted embeddings
+                pred_mean = pred_emb.mean().item()
+                pred_std = pred_emb.std().item()
+                pred_norm = torch.norm(pred_emb).item()
+                print(f"   Predicted Embeddings - Mean: {pred_mean:.6f}, Std: {pred_std:.6f}, Norm: {pred_norm:.6f}")
+                
+                # Target embeddings (detached)
+                target_detached_mean = target_emb_detached.mean().item()
+                target_detached_std = target_emb_detached.std().item()
+                target_detached_norm = torch.norm(target_emb_detached).item()
+                print(f"   Target Detached - Mean: {target_detached_mean:.6f}, Std: {target_detached_std:.6f}, Norm: {target_detached_norm:.6f}")
+            
+            # 4. NUMERICAL STABILITY CHECKS
+            print(f"🔬 NUMERICAL STABILITY:")
+            with torch.no_grad():
+                # Check for NaNs/Infs
+                online_nan = torch.isnan(online_s_t_emb).any().item()
+                target_nan = torch.isnan(target_s_t_emb).any().item()
+                pred_nan = torch.isnan(pred_emb).any().item()
+                loss_nan = torch.isnan(total_loss).item()
+                
+                online_inf = torch.isinf(online_s_t_emb).any().item()
+                target_inf = torch.isinf(target_s_t_emb).any().item()
+                pred_inf = torch.isinf(pred_emb).any().item()
+                loss_inf = torch.isinf(total_loss).item()
+                
+                print(f"   NaNs - Online: {online_nan}, Target: {target_nan}, Pred: {pred_nan}, Loss: {loss_nan}")
+                print(f"   Infs - Online: {online_inf}, Target: {target_inf}, Pred: {pred_inf}, Loss: {loss_inf}")
+                
+                # Check embedding ranges
+                online_min, online_max = online_s_t_emb.min().item(), online_s_t_emb.max().item()
+                target_min, target_max = target_s_t_emb.min().item(), target_s_t_emb.max().item()
+                pred_min, pred_max = pred_emb.min().item(), pred_emb.max().item()
+                
+                print(f"   Ranges - Online: [{online_min:.3f}, {online_max:.3f}], Target: [{target_min:.3f}, {target_max:.3f}], Pred: [{pred_min:.3f}, {pred_max:.3f}]")
+            
+            # 5. LEARNING RATE AND OPTIMIZER INFO
+            print(f"⚙️  OPTIMIZER INFO:")
+            if model_name_log_prefix == "JEPA":
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"   Learning Rate: {current_lr:.8f}")
+                
+                # Parameter count
+                total_params = sum(p.numel() for p in model.parameters())
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                print(f"   Total Parameters: {total_params:,}")
+                print(f"   Trainable Parameters: {trainable_params:,}")
+                
+                # Parameter count
+                total_params = sum(p.numel() for p in model.parameters())
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                print(f"   Total Parameters: {total_params:,}")
+                print(f"   Trainable Parameters: {trainable_params:,}")
+            
+            # 6. GRADIENT ANALYSIS (after backward pass)
+            if batch_idx % 50 == 0:  # Less frequent gradient analysis
+                print(f"📈 GRADIENT ANALYSIS:")
+                with torch.no_grad():
+                    # Calculate gradient norms before backward pass
+                    grad_norms = []
+                    param_norms = []
+                    
+                    for name, param in model.named_parameters():
+                        if param.grad is not None:
+                            grad_norm = param.grad.norm().item()
+                            param_norm = param.norm().item()
+                            grad_norms.append(grad_norm)
+                            param_norms.append(param_norm)
+                    
+                    if grad_norms:
+                        avg_grad_norm = sum(grad_norms) / len(grad_norms)
+                        max_grad_norm = max(grad_norms)
+                        avg_param_norm = sum(param_norms) / len(param_norms)
+                        
+                        print(f"   Avg Gradient Norm: {avg_grad_norm:.6f}")
+                        print(f"   Max Gradient Norm: {max_grad_norm:.6f}")
+                        print(f"   Avg Parameter Norm: {avg_param_norm:.6f}")
+                        print(f"   Gradient/Parameter Ratio: {avg_grad_norm/max(avg_param_norm, 1e-8):.6f}")
+                    else:
+                        print(f"   No gradients computed yet")
+            
+            print(f"{'='*80}\n")
+        
         # Check for numerical instability before backprop
         if not torch.isfinite(total_loss):
             print(f"WARNING: Non-finite loss detected! Primary: {current_loss_primary_item}, Aux: {current_loss_aux_item}")
@@ -152,6 +321,25 @@ def train_validate_model_epoch(
             total_loss_item = total_loss.item()
         
         total_loss.backward()
+        
+        # === GRADIENT DIAGNOSTICS ===
+        if model_name_log_prefix == "JEPA" and batch_idx % 50 == 0:
+            # Compute gradient statistics
+            total_grad_norm = 0
+            num_params_with_grad = 0
+            for param in model.parameters():
+                if param.grad is not None:
+                    total_grad_norm += param.grad.norm().item() ** 2
+                    num_params_with_grad += 1
+            
+            total_grad_norm = total_grad_norm ** 0.5
+            print(f"Gradient Stats: norm={total_grad_norm:.6f}, params_with_grad={num_params_with_grad}")
+            
+            # Check for gradient explosion/vanishing
+            if total_grad_norm > 10.0:
+                print(f"WARNING: Large gradient norm detected: {total_grad_norm:.6f}")
+            elif total_grad_norm < 1e-6:
+                print(f"WARNING: Very small gradient norm detected: {total_grad_norm:.6f}")
         
         # Enhanced gradient clipping with NaN/Inf checks
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -177,6 +365,12 @@ def train_validate_model_epoch(
         epoch_train_loss_std += std_loss.item()
         epoch_train_loss_cov += cov_loss.item()
 
+        # Progress indicator every 10% of batches or at log_interval, whichever is more frequent
+        progress_interval = max(1, min(log_interval, num_train_batches // 10))
+        if (batch_idx + 1) % progress_interval == 0:
+            progress_pct = ((batch_idx + 1) / num_train_batches) * 100
+            print(f"    {model_name_log_prefix} Epoch {epoch_num}: Batch {batch_idx+1}/{num_train_batches} ({progress_pct:.1f}%) - Loss: {total_loss_item:.4f}")
+        
         if (batch_idx + 1) % log_interval == 0:
             # Periodic stability check
             if (batch_idx + 1) % (log_interval * 5) == 0:  # Check every 5 log intervals
@@ -221,6 +415,56 @@ def train_validate_model_epoch(
     avg_epoch_train_loss_std = epoch_train_loss_std / num_train_batches if num_train_batches > 0 else 0
     avg_epoch_train_loss_cov = epoch_train_loss_cov / num_train_batches if num_train_batches > 0 else 0
 
+    # === COMPREHENSIVE EPOCH SUMMARY DIAGNOSTICS ===
+    if model_name_log_prefix == "JEPA":
+        print(f"\n{'='*80}")
+        print(f"JEPA EPOCH {epoch_num} SUMMARY")
+        print(f"{'='*80}")
+        
+        print(f"📊 TRAINING LOSSES (Averaged over {num_train_batches} batches):")
+        print(f"   Primary Loss (JEPA Prediction): {avg_epoch_train_loss_primary:.8f}")
+        print(f"   Auxiliary Loss (VICReg): {avg_epoch_train_loss_aux:.8f}")
+        print(f"   Std Loss: {avg_epoch_train_loss_std:.8f}")
+        print(f"   Cov Loss: {avg_epoch_train_loss_cov:.8f}")
+        print(f"   Total Loss: {avg_epoch_train_loss_primary + avg_epoch_train_loss_aux:.8f}")
+        
+        # Loss analysis
+        if avg_epoch_train_loss_primary > 0:
+            loss_ratio = avg_epoch_train_loss_aux / avg_epoch_train_loss_primary
+            print(f"   Loss Ratio (aux/primary): {loss_ratio:.2f}")
+        else:
+            print(f"   ⚠️  WARNING: Primary loss is zero!")
+        
+        # Training dynamics analysis
+        if epoch_num > 1:
+            print(f"📈 TRAINING DYNAMICS:")
+            # You can add loss history tracking here if needed
+            print(f"   Epoch {epoch_num} completed successfully")
+        
+        # Model health check
+        print(f"🔍 MODEL HEALTH:")
+        try:
+            with torch.no_grad():
+                # Check if model outputs are reasonable
+                if 'pred_emb' in locals():
+                    pred_stats = f"Pred emb: mean={pred_emb.mean().item():.4f}, std={pred_emb.std().item():.4f}"
+                    print(f"   {pred_stats}")
+                
+                # Check parameter statistics
+                total_params = sum(p.numel() for p in model.parameters())
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                print(f"   Parameters: {total_params:,} total, {trainable_params:,} trainable")
+                
+                # Check for any NaN parameters
+                nan_params = sum(torch.isnan(p).any().item() for p in model.parameters())
+                inf_params = sum(torch.isinf(p).any().item() for p in model.parameters())
+                print(f"   Parameter Health: {nan_params} NaN, {inf_params} Inf")
+                
+        except Exception as e:
+            print(f"   ⚠️  Model health check failed: {e}")
+        
+        print(f"{'='*80}\n")
+
     # === Validation and Epoch Summary Phase ===
     if val_dataloader:
         model.eval()
@@ -240,6 +484,8 @@ def train_validate_model_epoch(
         epoch_val_loss_primary, epoch_val_loss_aux = 0, 0
         epoch_val_loss_std, epoch_val_loss_cov = 0, 0
         num_val_batches = len(val_dataloader)
+        
+        print(f"  {model_name_log_prefix} Epoch {epoch_num}: Validating on {num_val_batches} batches...")
         
         # Store predictions for plotting if needed
         plot_predictions = None
@@ -261,15 +507,53 @@ def train_validate_model_epoch(
                 if model_name_log_prefix == "JEPA":
                     pred_emb_val, target_emb_detached_val, online_s_t_emb_val, target_s_t_emb_val = model(s_t_val, a_t_val_processed, s_t_plus_1_val)
                     
+                    # Primary loss: JEPA prediction loss
+                    val_loss_primary = loss_fn(pred_emb_val, target_emb_detached_val)
+                    
                     if aux_loss_fn is not None and use_aux_for_jepa:
-                        # Use VICReg forward method with projector for all three losses
-                        total_vicreg_loss_val, sim_loss_val, std_loss_val, cov_loss_val = aux_loss_fn(online_s_t_emb_val, target_s_t_emb_val)
-                        val_loss_aux_item = total_vicreg_loss_val.item()
-                        val_loss_primary = sim_loss_val  # For JEPA with VICReg, primary loss is the similarity (invariance) loss
-                    else:
-                        # Fallback to MSE loss between predicted and target embeddings
-                        val_loss_primary = loss_fn(pred_emb_val, target_emb_detached_val)
+                        # Handle different auxiliary loss types
+                        if hasattr(aux_loss_fn, 'calculate_reg_terms') and aux_loss_name != 'vicreg':
+                            # Use calculate_reg_terms for JEPA-style regularization (Barlow Twins reg terms)
+                            aux_loss_result_val = aux_loss_fn.calculate_reg_terms(online_s_t_emb_val)
+                        else:
+                            # Use forward method for full auxiliary loss (VICReg with two inputs)
+                            aux_loss_result_val = aux_loss_fn(online_s_t_emb_val, target_s_t_emb_val)
                         
+                        # Check if it's a tuple (multiple return values) or single value
+                        if isinstance(aux_loss_result_val, tuple):
+                            if len(aux_loss_result_val) == 4:
+                                # VICReg: (total_loss, sim_loss, std_loss, cov_loss)
+                                total_vicreg_loss_val, sim_loss_val, std_loss_val, cov_loss_val = aux_loss_result_val
+                                val_loss_aux_item = total_vicreg_loss_val
+                            elif len(aux_loss_result_val) == 3:
+                                # Barlow Twins calculate_reg_terms: (total_loss, invariance_loss, redundancy_loss)
+                                total_barlow_loss_val, invariance_loss_val, redundancy_loss_val = aux_loss_result_val
+                                val_loss_aux_item = total_barlow_loss_val
+                                # Set VICReg-specific losses to 0 for logging compatibility
+                                sim_loss_val = invariance_loss_val
+                                std_loss_val = torch.tensor(0.0, device=device)
+                                cov_loss_val = redundancy_loss_val
+                            else:
+                                # Fallback for other tuple returns
+                                total_vicreg_loss_val = aux_loss_result_val[0]
+                                val_loss_aux_item = total_vicreg_loss_val
+                                sim_loss_val = total_vicreg_loss_val
+                                std_loss_val = torch.tensor(0.0, device=device)
+                                cov_loss_val = torch.tensor(0.0, device=device)
+                        else:
+                            # Single value return (e.g., Barlow Twins forward method)
+                            total_vicreg_loss_val = aux_loss_result_val
+                            val_loss_aux_item = total_vicreg_loss_val
+                            sim_loss_val = total_vicreg_loss_val
+                            std_loss_val = torch.tensor(0.0, device=device)
+                            cov_loss_val = torch.tensor(0.0, device=device)
+                    else:
+                        # No auxiliary loss, just primary loss
+                        val_loss_aux_item = 0
+                        sim_loss_val = torch.tensor(0.0, device=device)
+                        std_loss_val = torch.tensor(0.0, device=device)
+                        cov_loss_val = torch.tensor(0.0, device=device)
+
                 else:  # Standard Encoder-Decoder or EncDecJEPAStyle - No auxiliary loss
                     output_val = model(s_t_val, a_t_val_processed)
                     predicted_s_t_plus_1_val = output_val[0] if isinstance(output_val, tuple) else output_val
@@ -297,7 +581,7 @@ def train_validate_model_epoch(
 
                 epoch_val_loss_primary += val_loss_primary.item()
                 epoch_val_loss_aux += val_loss_aux_item
-                epoch_val_loss_std += std_loss_val.item()
+                epoch_val_loss_std += sim_loss_val.item()
                 epoch_val_loss_cov += cov_loss_val.item()
 
         # Handle plotting after validation loop for encoder-decoder

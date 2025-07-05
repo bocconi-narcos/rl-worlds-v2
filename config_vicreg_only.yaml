@@ -1,0 +1,51 @@
+# Configuration for VICReg-only JEPA training
+experiments:
+  - name: "JEPA_VICReg"
+    aux_loss_type: "vicreg"
+    aux_loss_weight: 1.0
+    aux_params:
+      vicreg:
+        sim_coeff: 1.0
+        std_coeff: 1.0
+        cov_coeff: 0.8
+        proj_hidden_dim: 256
+        proj_output_dim: 256
+
+# Use base config for all other settings
+base_config: "config.yaml"
+
+# Training settings - DISABLE STANDARD ENCODER-DECODER
+training:
+  num_epochs: 10
+  early_stopping_patience: 5
+  early_stopping_delta: 0.001
+  options:
+    skip_std_enc_dec_training_if_loaded: true
+    skip_jepa_training_if_loaded: false
+
+# Model settings - DISABLE STANDARD ENCODER-DECODER
+models:
+  standard_encoder_decoder:
+    enabled: false  # DISABLE STANDARD ENCODER-DECODER
+  jepa:
+    enabled: true   # ENABLE JEPA
+  auxiliary_loss:
+    type: "vicreg"
+    use_for_jepa: true
+    use_for_enc_dec: false  # DISABLE FOR ENC-DEC
+    weight: 1.0
+
+# Output settings
+output:
+  results_dir: "vicreg_only_results"
+  save_checkpoints: true
+  save_models: true
+
+# Enable comprehensive diagnostics
+diagnostics:
+  enabled: true
+  batch_log_interval: 10  # Log every 10 batches
+  detailed_gradients: true
+  loss_components: true
+  embedding_stats: true
+  numerical_stability: true 

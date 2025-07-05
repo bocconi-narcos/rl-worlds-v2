@@ -34,7 +34,9 @@ def train_larp_epoch(
             base_model.eval()
 
         train_loss_sum = 0.0
-        num_train_batches = 0
+        num_train_batches = len(train_dataloader)
+        
+        print(f"  {model_name_log_prefix} Epoch {epoch+1}: Training on {num_train_batches} batches...")
 
         # Training phase
         for batch_idx, (s_t, a_t, r_t, s_t_plus_1) in enumerate(train_dataloader):
@@ -79,8 +81,13 @@ def train_larp_epoch(
             optimizer_larp.step()
 
             train_loss_sum += loss.item()
-            num_train_batches += 1
             total_train_steps += 1
+
+            # Progress indicator every 10% of batches or at log_interval, whichever is more frequent
+            progress_interval = max(1, min(log_interval_larp, num_train_batches // 10))
+            if (batch_idx + 1) % progress_interval == 0:
+                progress_pct = ((batch_idx + 1) / num_train_batches) * 100
+                print(f"    {model_name_log_prefix} Epoch {epoch+1}: Batch {batch_idx+1}/{num_train_batches} ({progress_pct:.1f}%) - Loss: {loss.item():.4f}")
 
             if wandb_run and batch_idx % log_interval_larp == 0:
                 wandb.log({
@@ -94,7 +101,9 @@ def train_larp_epoch(
         # Validation phase
         larp_model.eval()
         val_loss_sum = 0.0
-        num_val_batches = 0
+        num_val_batches = len(val_dataloader)
+        
+        print(f"  {model_name_log_prefix} Epoch {epoch+1}: Validating on {num_val_batches} batches...")
         
         # Collect predictions and true values for plotting
         all_true_rewards = []
@@ -126,7 +135,6 @@ def train_larp_epoch(
                 pred_reward = larp_model(input_to_larp)
                 val_loss = loss_fn(pred_reward, r_t.unsqueeze(1).float())
                 val_loss_sum += val_loss.item()
-                num_val_batches += 1
                 
                 # Collect predictions and true rewards for plotting
                 all_true_rewards.append(r_t.unsqueeze(1).float().cpu())

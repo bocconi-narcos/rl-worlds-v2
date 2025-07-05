@@ -212,12 +212,20 @@ def run_training_epochs(
     # Create reward plotters for reward MLP and LARP validation plotting
     reward_plotters = create_reward_plotters(config)
 
+    # Record overall training start time
+    import time
+    training_start_time = time.time()
+    print(f"\n=== Starting main training loop at {time.strftime('%H:%M:%S')} ===")
+
     for epoch in range(num_epochs):
         current_main_epoch_for_larp = epoch + 1 # Update current main epoch
-        print(f"\n--- Starting Epoch {epoch+1}/{num_epochs} ---")
+        import time
+        epoch_start_time = time.time()
+        print(f"\n--- Starting Epoch {epoch+1}/{num_epochs} at {time.strftime('%H:%M:%S')} ---")
 
         # --- Standard Encoder/Decoder Training ---
-        if std_enc_dec and not early_stopping_state_enc_dec['early_stop_flag']:
+        std_enc_dec_enabled = models_config.get('standard_encoder_decoder', {}).get('enabled', True)
+        if std_enc_dec and std_enc_dec_enabled and not early_stopping_state_enc_dec['early_stop_flag']:
             print(f"Standard Encoder/Decoder: Running training and validation for (Epoch {epoch+1})...")
             early_stopping_state_enc_dec, _, _ = train_validate_model_epoch(
                 model=std_enc_dec, optimizer=optimizer_std_enc_dec, train_dataloader=train_dataloader,
@@ -266,6 +274,11 @@ def run_training_epochs(
         if early_stopping_state_enc_dec['early_stop_flag'] and early_stopping_state_jepa['early_stop_flag']:
             print("Both main models have triggered early stopping or were skipped. Halting training.")
             break
+
+        # Print epoch completion time and duration
+        epoch_end_time = time.time()
+        epoch_duration = epoch_end_time - epoch_start_time
+        print(f"\n--- Completed Epoch {epoch+1}/{num_epochs} at {time.strftime('%H:%M:%S')} (Duration: {epoch_duration:.1f}s) ---")
 
     print("\nMain models training loop finished.")
 
@@ -440,7 +453,11 @@ def run_training_epochs(
 
    
 
-    print("\nAll training processes finished from training_engine.")
+    # Print overall training completion time and duration
+    training_end_time = time.time()
+    total_training_duration = training_end_time - training_start_time
+    print(f"\n=== All training processes finished at {time.strftime('%H:%M:%S')} ===")
+    print(f"=== Total training duration: {total_training_duration:.1f}s ({total_training_duration/60:.1f} minutes) ===")
 
     final_checkpoint_enc_dec = early_stopping_state_enc_dec.get('checkpoint_path') \
         if std_enc_dec and early_stopping_state_enc_dec.get('checkpoint_path') and os.path.exists(early_stopping_state_enc_dec['checkpoint_path']) \

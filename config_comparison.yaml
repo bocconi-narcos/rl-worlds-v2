@@ -1,0 +1,74 @@
+# Configuration file for auxiliary loss comparison experiments
+# This file defines which experiments to run and their parameters
+
+# Path to the base configuration file
+base_config_path: "config.yaml"
+
+# List of experiments to run
+experiments:
+  # Experiment 1: JEPA with VICReg
+  - name: "jepa_vicreg"
+    aux_loss_type: "vicreg"
+    aux_params:
+      vicreg:
+        sim_coeff: 1.0
+        std_coeff: 1.0
+        cov_coeff: 0.8
+        eps: 0.0001
+        proj_hidden_dim: 256
+        proj_output_dim: 256
+
+
+  # Experiment 2: JEPA with VICReg (different parameters)
+  - name: "jepa_vicreg_high_weight"
+    aux_loss_type: "vicreg"
+    aux_params:
+      vicreg:
+        sim_coeff: 0.1
+        std_coeff: 0.1
+        cov_coeff: 0.1
+        eps: 0.0001
+        proj_hidden_dim: 128
+        proj_output_dim: 128
+
+
+
+# Optional: Override specific base config parameters for all experiments
+# These will be applied to all experiments in addition to the base config
+base_overrides:
+  # Example: Reduce training epochs for faster comparison
+  training:
+    num_epochs: 2  # Reduced from default for faster comparison
+  
+  # Example: Disable some components to focus on JEPA comparison
+  models:
+    standard_encoder_decoder:
+      enabled: false  # Disable standard encoder-decoder training
+    
+    reward_predictors:
+      reward_mlp:
+        enabled: false  # Disable reward MLP training
+      larp:
+        enabled: false  # Disable LARP training
+    
+    jepa:
+      decoder_training:
+        enabled: false  # Disable JEPA decoder training
+
+# Comparison settings
+comparison:
+  # Whether to save detailed logs for each experiment
+  save_detailed_logs: true
+  
+  # Whether to create comparison plots
+  create_comparison_plots: true
+  
+  # Metrics to track for comparison
+  metrics:
+    - "best_val_loss_jepa"
+    - "final_epoch_jepa"
+    - "avg_train_loss_jepa"
+    - "avg_val_loss_jepa"
+  
+  # Output directory for comparison results
+  output_dir: "comparison_results" 
