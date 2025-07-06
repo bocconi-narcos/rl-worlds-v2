@@ -190,7 +190,7 @@ ppo_agent:
 vjepa2_world_model:
   stage1:
     # Masked prediction parameters
-    masking_ratio: 0.4
+    masking_ratio: 0.35
     mask_token_dim: 64
     ema_decay: 0.996
     num_epochs: 20  # Reduced from 100
@@ -203,7 +203,7 @@ vjepa2_world_model:
     sequence_length: 8
     teacher_forcing_ratio: 0.8
     rollout_steps: 4
-    num_epochs: 50  # Reduced from 50
+    num_epochs: 100  # Reduced from 50
     learning_rate: 0.0001  # Reduced from 0.0003
     early_stopping_patience: 3  # Added early stopping
     weight_decay: 0.05  # Added regularization

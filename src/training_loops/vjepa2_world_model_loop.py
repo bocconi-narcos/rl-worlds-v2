@@ -424,7 +424,7 @@ class VJEPA2WorldModelTrainer:
         self.stage2_model.train()
         self.encoder.eval()  # Encoder should be frozen
         
-        total_loss = 0.0
+        total_loss_sum = 0.0
         total_tf_loss = 0.0
         total_rollout_loss = 0.0
         num_batches = 0
@@ -484,19 +484,19 @@ class VJEPA2WorldModelTrainer:
             self.stage2_optimizer.step()
             
             # Update metrics
-            total_loss_val = total_loss.item()
+            total_loss_sum += total_loss.item()
             total_tf_loss += tf_loss.item()
             total_rollout_loss += rollout_loss.item()
             num_batches += 1
             
             # Update progress bar
             progress_bar.set_postfix({
-                'total_loss': f'{total_loss_val:.4f}',
+                'total_loss': f'{total_loss.item():.4f}',
                 'tf_loss': f'{tf_loss.item():.4f}',
                 'rollout_loss': f'{rollout_loss.item():.4f}'
             })
         
-        return (total_loss / num_batches, 
+        return (total_loss_sum / num_batches, 
                 total_tf_loss / num_batches, 
                 total_rollout_loss / num_batches)
     
@@ -505,7 +505,7 @@ class VJEPA2WorldModelTrainer:
         self.stage2_model.eval()
         self.encoder.eval()
         
-        total_loss = 0.0
+        total_loss_sum = 0.0
         num_batches = 0
         
         with torch.no_grad():
@@ -540,10 +540,10 @@ class VJEPA2WorldModelTrainer:
                 # Compute loss (for validation, use all steps for both teacher forcing and rollout)
                 loss, _, _ = self.stage2_loss(predicted_latents, target_latents, None, None)
                 
-                total_loss += loss.item()
+                total_loss_sum += loss.item()
                 num_batches += 1
         
-        return total_loss / num_batches
+        return total_loss_sum / num_batches
     
     def _log_stage1_metrics(self, epoch, train_loss, val_loss):
         """Log Stage 1 metrics."""

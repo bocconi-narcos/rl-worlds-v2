@@ -44,6 +44,8 @@ def main():
                        help="Train only specific stage (1 or 2)")
     parser.add_argument("--stage1-checkpoint", type=str, default="trained_models/best_stage1_model.pth",
                        help="Path to Stage 1 checkpoint for Stage 2 training")
+    parser.add_argument("--stage2-checkpoint", type=str, default=None,
+                       help="Path to Stage 2 checkpoint for resuming Stage 2 training")
     
     args = parser.parse_args()
     
@@ -134,6 +136,24 @@ def main():
                 
                 # Setup Stage 2 with the loaded encoder
                 trainer.setup_stage2()
+                
+                # Load Stage 2 checkpoint if provided
+                if args.stage2_checkpoint and os.path.exists(args.stage2_checkpoint):
+                    print(f"Loading Stage 2 checkpoint: {args.stage2_checkpoint}")
+                    try:
+                        stage2_checkpoint = torch.load(args.stage2_checkpoint, map_location=device)
+                        if 'model_state_dict' in stage2_checkpoint:
+                            trainer.stage2_model.load_state_dict(stage2_checkpoint['model_state_dict'])
+                            print("Successfully loaded Stage 2 model weights")
+                        if 'optimizer_state_dict' in stage2_checkpoint:
+                            trainer.stage2_optimizer.load_state_dict(stage2_checkpoint['optimizer_state_dict'])
+                            print("Successfully loaded Stage 2 optimizer state")
+                        if 'scheduler_state_dict' in stage2_checkpoint:
+                            trainer.stage2_scheduler.load_state_dict(stage2_checkpoint['scheduler_state_dict'])
+                            print("Successfully loaded Stage 2 scheduler state")
+                    except Exception as e:
+                        print(f"Error loading Stage 2 checkpoint: {e}")
+                        print("Proceeding with random initialization for Stage 2 model")
                 
                 # Train Stage 2
                 trainer.train_stage2()
