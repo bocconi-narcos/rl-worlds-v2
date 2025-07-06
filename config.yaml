@@ -2,7 +2,7 @@
 
 # --- Environment Configuration ---
 environment:
-  name: "ALE/Pong-v5" # Example, choose a relevant Gym environment (e.g., "CarRacing-v3", "ALE/Pong-v5")
+  name: "ALE/Breakout-v5"  # Now matches the dataset
   
   # Image preprocessing parameters
   input_channels_per_frame: 3 # Number of channels from environment (3=RGB, 1=grayscale, 4=RGBA)
@@ -17,7 +17,7 @@ environment:
   # Examples:
   # - RGB env, no conversion, 4-frame stack: current=(3*4=12 channels), next=(3 channels)
   # - RGB env, convert to grayscale, 4-frame stack: current=(1*4=4 channels), next=(1 channel)
-  # - Grayscale env, 4-frame stack: current=(1*4=4 channels), next=(1 channel)
+  # - Grayscale env, 4-frame stack: current=(1*4=4 chann't els), next=(1 channel)
 
 # --- Data Collection & Dataset Management ---
 data:
@@ -26,8 +26,8 @@ data:
     max_steps_per_episode: 300 # Max steps per episode during data collection
   dataset:
     dir: "datasets/"
-    load_path: "ale_pong_rep_2.pth" # empty string means don't load, otherwise it's a path relative to dataset.dir
-    filename: "ale_pong_rep_2.pth"
+    load_path: "montezuma_rep_w.pth" # empty string means don't load, otherwise it's a path relative to dataset.dir
+    filename: "montezuma_rep_w.pth"
   validation_split: 0.2 # Proportion of data to use for validation (moved from early_stopping)
 
 # --- Model Loading Configuration ---
@@ -39,8 +39,8 @@ model_loading:
 # --- General Training Configuration ---
 training:
   num_epochs: 20
-  batch_size: 32
-  learning_rate: 0.0003 # General learning rate, reduced for stability
+  batch_size: 64
+  learning_rate: 0.001 # General learning rate, reduced for stability
   num_workers: 0 # For DataLoader
   log_interval: 20 # Log training progress every N batches
   frame_skipping: 0 # Number of frames to skip. Note: If using action_repetition_k in PPO, this should ideally be 0.
@@ -102,7 +102,7 @@ models:
     decoder_patch_size: 4   # Patch size for reconstructing output. Defaults to models.shared_patch_size if null/not present.
 
   jepa:
-    learning_rate: 0.0003    # Specific learning rate for JEPA optimizer, reduced for stability
+    learning_rate: 0.001    # Specific learning rate for JEPA optimizer, reduced for stability
     # predictor_output_dim for JEPA model is models.shared_latent_dim
     predictor_hidden_dims: [256, 256] # Hidden dimension for the JEPA predictor MLP. Also used by enc_dec_jepa_style.
     predictor_dropout_rate: 0  # Dropout rate for JEPA predictor MLP layers. Also used by enc_dec_jepa_style.
@@ -147,17 +147,17 @@ models:
       dropout_rate: 0.2
       early_stopping_patience: 3
 
-  auxiliary_loss: # Configuration for auxiliary losses like VICReg, Barlow Twins, DINO
+  auxiliary_loss: 
     type: "vicreg"  # Options: "vicreg", "barlow_twins", "dino"
     use_for_jepa: true # Whether to use this auxiliary loss for JEPA training
-    use_for_enc_dec: true # Whether to use this auxiliary loss for Encoder-Decoder training
+    use_for_enc_dec: false # Whether to use this auxiliary loss for Encoder-Decoder training
     weight: 1     # General weight for the chosen auxiliary loss
     params:
       vicreg:
         # For JEPA's use of calculate_reg_terms, only std_coeff and cov_coeff are relevant.
-        sim_coeff: 1.0  # Default to 0 as per current train.py for reg_terms
+        sim_coeff: 0.5  # Default to 0 as per current train.py for reg_terms
         std_coeff: 1.0  # Reduced from 25.0 for stability
-        cov_coeff: 0.1  # Reduced from 1.0 for stability
+        cov_coeff: 0.05  # Reduced from 1.0 for stability
         eps: 0.0001     # Default VICRegLoss epsilon
         proj_hidden_dim: 512
         proj_output_dim: 512
@@ -172,7 +172,7 @@ models:
 
 # --- PPO Agent Configuration for Data Collection ---
 ppo_agent:
-  enabled: true # Master switch for using PPO for data collection
+  enabled: false # Master switch for using PPO for data collection
   n_envs: 8 # Number of parallel environments for PPO training (default: CPU count)
   action_repetition_k: 2
   learning_rate: 0.0003
