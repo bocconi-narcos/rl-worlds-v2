@@ -19,6 +19,7 @@ from src.models.world_model_transformer import WorldModelTransformer
 from src.losses.masked_prediction_loss import MaskedPredictionLoss, WorldModelLoss
 from src.utils.weight_init import initialize_weights
 from src.utils.env_utils import get_env_details
+from src.utils.data_utils import TemporalSequenceDataset
 
 
 class VJEPA2WorldModelTrainer:
@@ -170,6 +171,46 @@ class VJEPA2WorldModelTrainer:
         for param in encoder.parameters():
             param.requires_grad = False
         
+        # Create temporal sequence datasets
+        print("Creating temporal sequence datasets...")
+        self.temporal_train_dataset = TemporalSequenceDataset(
+            self.train_dataloader.dataset,
+            sequence_length=self.sequence_length,
+            stride=1,  # Consecutive sequences
+            config=self.config
+        )
+        
+        if self.val_dataloader is not None:
+            self.temporal_val_dataset = TemporalSequenceDataset(
+                self.val_dataloader.dataset,
+                sequence_length=self.sequence_length,
+                stride=1,  # Consecutive sequences
+                config=self.config
+            )
+        else:
+            self.temporal_val_dataset = None
+        
+        # Create new dataloaders for temporal sequences
+        from torch.utils.data import DataLoader
+        self.temporal_train_dataloader = DataLoader(
+            self.temporal_train_dataset,
+            batch_size=self.train_dataloader.batch_size,
+            shuffle=True,
+            num_workers=self.train_dataloader.num_workers,
+            pin_memory=self.train_dataloader.pin_memory
+        )
+        
+        if self.temporal_val_dataset is not None:
+            self.temporal_val_dataloader = DataLoader(
+                self.temporal_val_dataset,
+                batch_size=self.val_dataloader.batch_size,
+                shuffle=False,
+                num_workers=self.val_dataloader.num_workers,
+                pin_memory=self.val_dataloader.pin_memory
+            )
+        else:
+            self.temporal_val_dataloader = None
+        
         # Create world model transformer
         self.stage2_model = WorldModelTransformer(
             latent_dim=self.latent_dim,
@@ -216,6 +257,9 @@ class VJEPA2WorldModelTrainer:
         )
         
         print(f"Stage 2 model parameters: {sum(p.numel() for p in self.stage2_model.parameters()):,}")
+        print(f"Temporal training sequences: {len(self.temporal_train_dataset)}")
+        if self.temporal_val_dataset is not None:
+            print(f"Temporal validation sequences: {len(self.temporal_val_dataset)}")
     
     def train_stage1(self):
         """Train Stage 1: Masked Prediction Model."""
@@ -323,9 +367,9 @@ class VJEPA2WorldModelTrainer:
                     B, F, C, H, W = s_t.shape
                     s_t = s_t.view(B, F * C, H, W)
                 
-                # Forward pass - use no masking for validation to get proper reconstruction loss
+                # Forward pass
                 predicted_embeddings, target_embeddings, mask = self.stage1_model(
-                    s_t, mask_ratio=0.0  # No masking for validation
+                    s_t, mask_ratio=self.masking_ratio
                 )
                 
                 # Compute loss
@@ -346,11 +390,11 @@ class VJEPA2WorldModelTrainer:
             
             # Validation phase
             val_loss = 0.0
-            if self.val_dataloader is not None:
+            if self.temporal_val_dataloader is not None:
                 val_loss = self._validate_stage2_epoch(epoch)
             
             # Update scheduler based on validation loss
-            if self.val_dataloader is not None:
+            if self.temporal_val_dataloader is not None:
                 self.stage2_scheduler.step(val_loss)
             else:
                 self.stage2_scheduler.step(train_loss)
@@ -362,17 +406,14 @@ class VJEPA2WorldModelTrainer:
             current_lr = self.stage2_optimizer.param_groups[0]['lr']
             print(f"Current learning rate: {current_lr:.2e}")
             
-            # Early stopping - only trigger if validation loss is significantly worse
-            if self.val_dataloader is not None:
+            # Early stopping
+            if self.temporal_val_dataloader is not None:
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                     self.early_stopping_counter = 0
                     self._save_stage2_checkpoint()
-                elif val_loss > self.best_val_loss * 1.1:  # Only stop if val loss is 10% worse
-                    self.early_stopping_counter += 1
                 else:
-                    # If val loss is similar to best, don't increment counter
-                    pass
+                    self.early_stopping_counter += 1
                 
                 if self.early_stopping_counter >= self.stage2_early_stopping_patience:
                     print(f"Early stopping at epoch {epoch} (patience: {self.stage2_early_stopping_patience})")
@@ -388,58 +429,43 @@ class VJEPA2WorldModelTrainer:
         total_rollout_loss = 0.0
         num_batches = 0
         
-        progress_bar = tqdm(self.train_dataloader, desc=f"Stage 2 Epoch {epoch+1}")
+        progress_bar = tqdm(self.temporal_train_dataloader, desc=f"Stage 2 Epoch {epoch+1}")
         
         for batch_idx, (s_t, a_t, r_t, s_t_plus_1) in enumerate(progress_bar):
-            # Prepare sequences
-            s_t = s_t.to(self.device)
-            a_t = a_t.to(self.device)
-            s_t_plus_1 = s_t_plus_1.to(self.device)
-            
-            # Handle frame stacking: reshape from (B, F, C, H, W) to (B, F*C, H, W)
-            if s_t.dim() == 5:
-                B, F, C, H, W = s_t.shape
-                s_t = s_t.view(B, F * C, H, W)
-            if s_t_plus_1.dim() == 5:
-                B, F, C, H, W = s_t_plus_1.shape
-                s_t_plus_1 = s_t_plus_1.view(B, F * C, H, W)
+            # Prepare sequences - now these are already temporal sequences
+            s_t = s_t.to(self.device)  # [B, T, F*C, H, W]
+            a_t = a_t.to(self.device)  # [B, T]
+            s_t_plus_1 = s_t_plus_1.to(self.device)  # [B, T, F*C, H, W]
             
             # Zero gradients
             self.stage2_optimizer.zero_grad()
             
             # Encode observations using frozen encoder
             with torch.no_grad():
-                # For now, we'll create a simple sequence by repeating the encoded frame
-                # In a real implementation, you'd want to collect actual sequences from the dataset
-                current_latent = self.encoder(s_t)  # [B, D]
-                target_latent = self.encoder(s_t_plus_1)  # [B, D]
+                B, T = s_t.shape[:2]
                 
-                            # Create sequences with some variation to make the task more meaningful
-            # Add small noise to create temporal variation
-            noise_scale = 0.1
-            latents = current_latent.unsqueeze(1).repeat(1, self.sequence_length, 1)  # [B, T, D]
-            target_latents = target_latent.unsqueeze(1).repeat(1, self.sequence_length, 1)  # [B, T, D]
+                # Reshape for batch encoding: [B*T, F*C, H, W]
+                s_t_flat = s_t.view(B * T, -1, s_t.shape[-2], s_t.shape[-1])
+                s_t_plus_1_flat = s_t_plus_1.view(B * T, -1, s_t_plus_1.shape[-2], s_t_plus_1.shape[-1])
+                
+                # Encode all frames at once
+                latents_flat = self.encoder(s_t_flat)  # [B*T, D]
+                target_latents_flat = self.encoder(s_t_plus_1_flat)  # [B*T, D]
+                
+                # Reshape back to sequence format: [B, T, D]
+                latents = latents_flat.view(B, T, -1)
+                target_latents = target_latents_flat.view(B, T, -1)
             
-            # Add progressive noise to simulate temporal dynamics
-            for t in range(1, self.sequence_length):
-                latents[:, t] = latents[:, t] + torch.randn_like(latents[:, t]) * noise_scale * t
-                target_latents[:, t] = target_latents[:, t] + torch.randn_like(target_latents[:, t]) * noise_scale * t
-            
-            # Prepare action sequences
+            # Prepare action sequences - already in correct format [B, T]
             if self.action_type == 'discrete':
                 actions = a_t.long()
             else:
                 actions = a_t.float()
             
-            # Create action sequences by repeating the action (simplified approach)
-            # In practice, you'd want to collect actual action sequences
-            actions = actions.unsqueeze(1).repeat(1, self.sequence_length)  # [B, T] for discrete or [B, T, A] for continuous
-            
             # Forward pass
             predicted_latents = self.stage2_model(latents, actions)
             
             # Create masks for teacher forcing vs rollout
-            B, T = latents.shape[:2]
             teacher_forcing_mask = torch.rand(B, T, device=self.device) < self.teacher_forcing_ratio
             rollout_mask = ~teacher_forcing_mask
             
@@ -483,41 +509,30 @@ class VJEPA2WorldModelTrainer:
         num_batches = 0
         
         with torch.no_grad():
-            for s_t, a_t, r_t, s_t_plus_1 in self.val_dataloader:
-                s_t = s_t.to(self.device)
-                a_t = a_t.to(self.device)
-                s_t_plus_1 = s_t_plus_1.to(self.device)
+            for s_t, a_t, r_t, s_t_plus_1 in self.temporal_val_dataloader:
+                s_t = s_t.to(self.device)  # [B, T, F*C, H, W]
+                a_t = a_t.to(self.device)  # [B, T]
+                s_t_plus_1 = s_t_plus_1.to(self.device)  # [B, T, F*C, H, W]
                 
-                # Handle frame stacking: reshape from (B, F, C, H, W) to (B, F*C, H, W)
-                if s_t.dim() == 5:
-                    B, F, C, H, W = s_t.shape
-                    s_t = s_t.view(B, F * C, H, W)
-                if s_t_plus_1.dim() == 5:
-                    B, F, C, H, W = s_t_plus_1.shape
-                    s_t_plus_1 = s_t_plus_1.view(B, F * C, H, W)
+                B, T = s_t.shape[:2]
                 
-                # Encode observations
-                current_latent = self.encoder(s_t)  # [B, D]
-                target_latent = self.encoder(s_t_plus_1)  # [B, D]
+                # Reshape for batch encoding: [B*T, F*C, H, W]
+                s_t_flat = s_t.view(B * T, -1, s_t.shape[-2], s_t.shape[-1])
+                s_t_plus_1_flat = s_t_plus_1.view(B * T, -1, s_t_plus_1.shape[-2], s_t_plus_1.shape[-1])
                 
-                # Create sequences with some variation to make the task more meaningful
-                noise_scale = 0.1
-                latents = current_latent.unsqueeze(1).repeat(1, self.sequence_length, 1)  # [B, T, D]
-                target_latents = target_latent.unsqueeze(1).repeat(1, self.sequence_length, 1)  # [B, T, D]
+                # Encode all frames at once
+                latents_flat = self.encoder(s_t_flat)  # [B*T, D]
+                target_latents_flat = self.encoder(s_t_plus_1_flat)  # [B*T, D]
                 
-                # Add progressive noise to simulate temporal dynamics
-                for t in range(1, self.sequence_length):
-                    latents[:, t] = latents[:, t] + torch.randn_like(latents[:, t]) * noise_scale * t
-                    target_latents[:, t] = target_latents[:, t] + torch.randn_like(target_latents[:, t]) * noise_scale * t
+                # Reshape back to sequence format: [B, T, D]
+                latents = latents_flat.view(B, T, -1)
+                target_latents = target_latents_flat.view(B, T, -1)
                 
-                # Prepare actions
+                # Prepare actions - already in correct format [B, T]
                 if self.action_type == 'discrete':
                     actions = a_t.long()
                 else:
                     actions = a_t.float()
-                
-                # Create action sequences by repeating the action (simplified approach)
-                actions = actions.unsqueeze(1).repeat(1, self.sequence_length)  # [B, T] for discrete or [B, T, A] for continuous
                 
                 # Forward pass
                 predicted_latents = self.stage2_model(latents, actions)
