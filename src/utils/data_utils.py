@@ -96,6 +96,79 @@ class ExperienceDataset(Dataset):
         return state, action_tensor, reward_tensor, next_state
 
 
+class TemporalSequenceDataset(Dataset):
+    """
+    Dataset for temporal sequence training in Stage 2.
+    Creates sequences of consecutive transitions for world model training.
+    """
+    
+    def __init__(self, base_dataset, sequence_length=8, stride=1, transform=None, config=None):
+        """
+        Initialize temporal sequence dataset.
+        
+        Args:
+            base_dataset: Base ExperienceDataset
+            sequence_length: Length of temporal sequences to create
+            stride: Stride between sequence starts (1 = consecutive, 2 = every other, etc.)
+            transform: Optional transform to apply
+            config: Configuration dictionary
+        """
+        self.base_dataset = base_dataset
+        self.sequence_length = sequence_length
+        self.stride = stride
+        self.transform = transform
+        self.config = config
+        
+        # Calculate valid sequence indices
+        self.valid_sequences = []
+        for start_idx in range(0, len(base_dataset) - sequence_length + 1, stride):
+            self.valid_sequences.append(start_idx)
+        
+        print(f"Created {len(self.valid_sequences)} temporal sequences from {len(base_dataset)} base samples")
+        print(f"Sequence length: {sequence_length}, Stride: {stride}")
+    
+    def __len__(self):
+        return len(self.valid_sequences)
+    
+    def __getitem__(self, idx):
+        start_idx = self.valid_sequences[idx]
+        
+        # Collect sequence of transitions
+        states = []
+        actions = []
+        rewards = []
+        next_states = []
+        
+        for i in range(self.sequence_length):
+            sample_idx = start_idx + i
+            state, action, reward, next_state = self.base_dataset[sample_idx]
+            
+            states.append(state)
+            actions.append(action)
+            rewards.append(reward)
+            next_states.append(next_state)
+        
+        # Stack into tensors
+        # states: [T, F, C, H, W] -> [T, F*C, H, W] for encoder
+        # actions: [T]
+        # rewards: [T]
+        # next_states: [T, F, C, H, W] -> [T, F*C, H, W] for encoder
+        
+        # Handle frame stacking: reshape from (T, F, C, H, W) to (T, F*C, H, W)
+        stacked_states = torch.stack(states)  # [T, F, C, H, W]
+        stacked_next_states = torch.stack(next_states)  # [T, F, C, H, W]
+        
+        if stacked_states.dim() == 5:
+            T, F, C, H, W = stacked_states.shape
+            stacked_states = stacked_states.view(T, F * C, H, W)
+            stacked_next_states = stacked_next_states.view(T, F * C, H, W)
+        
+        actions = torch.stack(actions)  # [T]
+        rewards = torch.stack(rewards)  # [T]
+        
+        return stacked_states, actions, rewards, stacked_next_states
+
+
 def collect_random_episodes(config, max_steps_per_episode, image_size, validation_split_ratio, frame_skipping):
     env_name = config['environment']['name']
     num_episodes = config['data']['collection']['num_episodes']
