@@ -164,19 +164,6 @@ stage2:
 | **Rollout Loss** | < 0.15 | 0.15-0.4 | 0.4-0.6 | > 0.6 |
 | **Val/Train Ratio** | < 1.2 | 1.2-1.5 | 1.5-2.0 | > 2.0 |
 
-### **Expected Learning Curves**
-```
-Stage 1:
-Epoch 1:  Train Loss: 0.4-0.6, Val Loss: 0.3-0.5
-Epoch 5:  Train Loss: 0.1-0.2, Val Loss: 0.08-0.15
-Epoch 10: Train Loss: 0.05-0.1, Val Loss: 0.04-0.08
-
-Stage 2:
-Epoch 1:  Total Loss: 0.4-0.6, TF: 0.3-0.5, Rollout: 0.5-0.8
-Epoch 10: Total Loss: 0.2-0.3, TF: 0.15-0.25, Rollout: 0.25-0.4
-Epoch 20: Total Loss: 0.15-0.25, TF: 0.1-0.2, Rollout: 0.2-0.3
-```
-
 ## 🚀 Usage
 
 ### **Training Commands**
@@ -281,20 +268,3 @@ vjepa2_world_model:
 - Compatible with existing data pipeline
 - Full configuration system support
 - Seamless integration with main training loop
-
-## 🎯 Success Criteria
-
-### **Stage 1 Success**
-- ✅ Train loss < 0.05
-- ✅ Val/Train ratio < 1.5
-- ✅ No overfitting (val loss stable)
-- ✅ Encoder learns meaningful representations
-
-### **Stage 2 Success**
-- ✅ Total loss reaches 0.1-0.3 range
-- ✅ Rollout loss > Teacher forcing loss
-- ✅ Training runs for 15+ epochs
-- ✅ Validation loss stable and reasonable
-- ✅ World model learns temporal dynamics
-
-This implementation provides a complete V-JEPA2 pipeline for learning world models from visual observations and actions! 🎉 
