@@ -1,10 +1,38 @@
-# RL World Models: Encoder-Decoder vs. JEPA
+# RL World Models: Encoder-Decoder vs. JEPA vs. VJEPA2
 
-This project implements and compares two world model architectures for learning from visual observations in Gymnasium environments:
+This project implements and compares three world model architectures for learning from visual observations in Gymnasium environments:
 1.  A **Standard Encoder-Decoder** model.
 2.  A **Joint Embedding Predictive Architecture (JEPA)**.
+3.  A **Two-Stage VJEPA2 World Model** (NEW, see below).
 
-Both architectures are designed to learn representations of the environment and predict future states or state embeddings. The primary goal is to investigate the quality of learned representations and their utility for downstream tasks, particularly for research purposes.
+Both JEPA and VJEPA2 are designed to learn representations of the environment and predict future states or state embeddings. The VJEPA2 pipeline is now the recommended approach for advanced latent world modeling.
+
+## VJEPA2 Pipeline (NEW)
+
+VJEPA2 is a two-stage world model:
+- **Stage 1:** Self-supervised encoder pretraining (MaskedViT, MaskedPredictionModel)
+- **Stage 2:** Action-conditioned world model transformer in latent space
+
+After both stages, the encoder and world model are **frozen** and used as a drop-in replacement for JEPA in downstream tasks (reward MLPs, LARP, etc.).
+
+- The new entry point is `main_vjepa2.py`.
+- The JEPA model in the pipeline is now a wrapper around the frozen VJEPA2 encoder/world model.
+- Only downstream predictors (reward MLPs, LARP, etc.) are trained after VJEPA2 stages.
+
+For full details, see [`README_VJEPA2.md`](README_VJEPA2.md).
+
+## Quick Start (VJEPA2)
+
+1. **Configure your experiment:** Edit `config.yaml` as usual.
+2. **Run the VJEPA2 pipeline:**
+   ```bash
+   python main_vjepa2.py
+   ```
+   This will train VJEPA2 (both stages), freeze the encoder/world model, and train all downstream predictors as before.
+
+## Other Architectures
+
+(Standard Encoder-Decoder and JEPA remain available; see below for details.)
 
 ## Full Documentation
 

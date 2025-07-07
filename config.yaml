@@ -71,8 +71,8 @@ models:
         heads: 4                # Number of attention heads in ViT
         mlp_dim: 512            # Dimension of the MLP within ViT Transformer blocks
         pool: 'cls'             # Type of pooling ('cls' token or 'mean' pooling)
-        dropout: 0.2              # Dropout rate in ViT
-        emb_dropout: 0          # Embedding dropout rate in ViT
+        dropout: 0.3              # Increased dropout rate in ViT for regularization
+        emb_dropout: 0.1          # Added embedding dropout for regularization
       cnn:
         num_conv_layers: 3      # Number of convolutional layers
         base_filters: 32        # Number of filters in the first convolutional layer
@@ -184,6 +184,28 @@ ppo_agent:
   clip_range: 0.3     # PPO clip_range parameter
   additional_log_std_noise: 0.0
   policy_type: "CnnPolicy" # Policy type, e.g., "CnnPolicy" for image-based envs
+
+# --- V-JEPA2 World Model Configuration ---
+vjepa2_world_model:
+  stage1:
+    # Masked prediction parameters
+    masking_ratio: 0.35
+    mask_token_dim: 64
+    ema_decay: 0.996
+    num_epochs: 20  # Reduced from 100
+    learning_rate: 0.0001  # Reduced from 0.0003
+    early_stopping_patience: 1  # Reduced from 5
+    weight_decay: 0.05  # Increased regularization
+    
+  stage2:
+    # World model parameters
+    sequence_length: 8
+    teacher_forcing_ratio: 0.8
+    rollout_steps: 4
+    num_epochs: 100  # Reduced from 50
+    learning_rate: 0.0001  # Reduced from 0.0003
+    early_stopping_patience: 3  # Added early stopping
+    weight_decay: 0.05  # Added regularization
 
 # --- Weights & Biases Logging ---
 wandb:

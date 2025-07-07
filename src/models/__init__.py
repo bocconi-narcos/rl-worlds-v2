@@ -6,6 +6,9 @@ from .cnn import CNNEncoder
 from .mlp import MLPEncoder
 from .decoder import StateDecoder
 from .encoder_decoder_jepa_style import EncoderDecoderJEPAStyle
+from .masked_vit import MaskedViT
+from .masked_prediction_model import MaskedPredictionModel
+from .world_model_transformer import WorldModelTransformer
 
 __all__ = [
     "ViT",
@@ -14,5 +17,8 @@ __all__ = [
     "CNNEncoder",
     "MLPEncoder",
     "StateDecoder",
-    "EncoderDecoderJEPAStyle"
+    "EncoderDecoderJEPAStyle",
+    "MaskedViT",
+    "MaskedPredictionModel",
+    "WorldModelTransformer"
 ]
