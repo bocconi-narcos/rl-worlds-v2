@@ -383,6 +383,9 @@ class VJEPA2WorldModelTrainer:
     def train_stage2(self):
         """Train Stage 2: World Model Transformer."""
         print(f"Starting Stage 2 training for {self.stage2_epochs} epochs")
+        # Ensure best_val_loss and patience counter are reset at the start of every run
+        self.best_val_loss = float('inf')
+        self.early_stopping_counter = 0
         
         for epoch in range(self.stage2_epochs):
             # Training phase
@@ -408,6 +411,8 @@ class VJEPA2WorldModelTrainer:
             
             # Early stopping
             if self.temporal_val_dataloader is not None:
+                # Debug print for early stopping state
+                print(f"Epoch {epoch+1}: val_loss={val_loss:.4f}, best_val_loss={self.best_val_loss:.4f}, patience={self.early_stopping_counter}/{self.stage2_early_stopping_patience}")
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                     self.early_stopping_counter = 0
@@ -416,7 +421,7 @@ class VJEPA2WorldModelTrainer:
                     self.early_stopping_counter += 1
                 
                 if self.early_stopping_counter >= self.stage2_early_stopping_patience:
-                    print(f"Early stopping at epoch {epoch} (patience: {self.stage2_early_stopping_patience})")
+                    print(f"Early stopping triggered after {epoch+1} epochs (patience: {self.stage2_early_stopping_patience})")
                     break
     
     def _train_stage2_epoch(self, epoch):
