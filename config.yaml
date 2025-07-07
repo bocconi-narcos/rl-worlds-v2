@@ -3,11 +3,10 @@
 # --- Environment Configuration ---
 environment:
   name: "ALE/Breakout-v5" # Example, choose a relevant Gym environment (e.g., "CarRacing-v3", "ALE/Pong-v5")
+  name: "ALE/Assault-v5" # Simple environment for testing (was "ALE/Assault-v5")
   
   # Image preprocessing parameters
-  input_channels_per_frame: 3 # Number of channels from environment (3=RGB, 1=grayscale, 4=RGBA)
   frame_stack_size: 4         # Number of frames to stack (1 = no stacking, 4 = stack 4 frames)
-  grayscale_conversion: true # Convert RGB to grayscale during preprocessing (only applies if input_channels_per_frame=3)
   image_height: 64            # Target height for image preprocessing
   image_width: 64             # Target width for image preprocessing
   
@@ -22,10 +21,14 @@ environment:
 # --- Data Collection & Dataset Management ---
 data:
   collection:
+    num_episodes: 100 # Number of episodes to collect for the dataset (reduced for testing)
+    max_steps_per_episode: 300 # Max steps per episode during data collection (reduced for testing)
     num_episodes: 0 # Number of episodes to collect for the dataset
     max_steps_per_episode: 50 # Max steps per episode during data collection
   dataset:
     dir: "datasets/"
+    load_path: ".pth" # empty string means don't load, otherwise it's a path relative to dataset.dir
+    filename: "assault_rep_4.pth"
     load_path: "montezuma_rep_w.pth" # empty string means don't load, otherwise it's a path relative to dataset.dir
     filename: "montezuma_rep_w.pth"
   validation_split: 0.2 # Proportion of data to use for validation (moved from early_stopping)
@@ -172,17 +175,21 @@ models:
 
 # --- PPO Agent Configuration for Data Collection ---
 ppo_agent:
+  enabled: true # Master switch for using PPO for data collection
+  n_envs: 10 # Number of parallel environments for PPO training (default: CPU count)
+  use_subproc_vec_env: true # Use SubprocVecEnv instead of DummyVecEnv for better performance
+  action_repetition_k: 4
   enabled: false # Master switch for using PPO for data collection
   n_envs: 8 # Number of parallel environments for PPO training (default: CPU count)
   action_repetition_k: 2
   learning_rate: 0.0003
-  total_train_timesteps: 500000 # Timesteps to train PPO before data collection
-  n_steps: 1024       # PPO n_steps parameter
-  batch_size: 32      # PPO batch_size parameter
+  total_train_timesteps: 10000000 # Timesteps to train PPO before data collection (reduced for testing)
+  n_steps: 128       # PPO n_steps parameter
+  batch_size: 256      # PPO batch_size parameter
   n_epochs: 5         # PPO n_epochs parameter
   gamma: 0.99         # PPO gamma parameter
   gae_lambda: 0.95    # PPO gae_lambda parameter
-  clip_range: 0.2     # PPO clip_range parameter
+  clip_range: 0.3     # PPO clip_range parameter
   additional_log_std_noise: 0.0
   policy_type: "CnnPolicy" # Policy type, e.g., "CnnPolicy" for image-based envs
 
