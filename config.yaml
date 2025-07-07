@@ -2,7 +2,6 @@
 
 # --- Environment Configuration ---
 environment:
-  name: "ALE/Breakout-v5" # Example, choose a relevant Gym environment (e.g., "CarRacing-v3", "ALE/Pong-v5")
   name: "ALE/Assault-v5" # Simple environment for testing (was "ALE/Assault-v5")
   
   # Image preprocessing parameters
@@ -23,14 +22,10 @@ data:
   collection:
     num_episodes: 100 # Number of episodes to collect for the dataset (reduced for testing)
     max_steps_per_episode: 300 # Max steps per episode during data collection (reduced for testing)
-    num_episodes: 0 # Number of episodes to collect for the dataset
-    max_steps_per_episode: 50 # Max steps per episode during data collection
   dataset:
     dir: "datasets/"
     load_path: ".pth" # empty string means don't load, otherwise it's a path relative to dataset.dir
     filename: "assault_rep_4.pth"
-    load_path: "montezuma_rep_w.pth" # empty string means don't load, otherwise it's a path relative to dataset.dir
-    filename: "montezuma_rep_w.pth"
   validation_split: 0.2 # Proportion of data to use for validation (moved from early_stopping)
 
 # --- Model Loading Configuration ---
@@ -179,9 +174,6 @@ ppo_agent:
   n_envs: 10 # Number of parallel environments for PPO training (default: CPU count)
   use_subproc_vec_env: true # Use SubprocVecEnv instead of DummyVecEnv for better performance
   action_repetition_k: 4
-  enabled: false # Master switch for using PPO for data collection
-  n_envs: 8 # Number of parallel environments for PPO training (default: CPU count)
-  action_repetition_k: 2
   learning_rate: 0.0003
   total_train_timesteps: 10000000 # Timesteps to train PPO before data collection (reduced for testing)
   n_steps: 128       # PPO n_steps parameter
