@@ -15,8 +15,8 @@ from pathlib import Path
 # Add src to path
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.models.masked_prediction_model import MaskedPredictionModel
-from src.models.world_model_transformer import WorldModelTransformer
+from models.vitto.masked_prediction_model import MaskedPredictionModel
+from models.vitto.world_model_transformer import WorldModelTransformer
 from src.data_handling import prepare_dataloaders
 from src.utils.config_utils import load_config
 from src.utils.env_utils import get_env_details
