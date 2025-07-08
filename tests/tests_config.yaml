@@ -1,0 +1,172 @@
+# V-JEPA2 Model Testing Configuration
+# This file contains all configurable parameters for testing the models
+
+# General test settings
+general:
+  # Random seed for reproducibility
+  random_seed: 42
+  # Device to run tests on ('cpu', 'cuda', 'mps', 'auto')
+  # 'auto' will automatically choose the best available device (mps > cuda > cpu)
+  device: 'mps'
+  # Whether to print detailed output
+  verbose: true
+  # Whether to run performance timing tests
+  include_timing: false
+
+# Which test suites to run
+test_suites:
+  vision_transformer: true
+  predictor_first_stage: false
+  predictor_second_stage: false
+  model_integration: false
+
+# VisionTransformer test configurations
+vision_transformer:
+  # Image input tests
+  image_tests:
+    batch_size: 2
+    img_size: [224, 224]
+    patch_size: 16
+    in_chans: 3
+    embed_dim: 384
+    depth: 6
+    num_heads: 6
+    use_rope: false
+  
+  # Video input tests
+  video_tests:
+    batch_size: 2
+    img_size: [224, 224]
+    patch_size: 16
+    num_frames: 8
+    tubelet_size: 2
+    in_chans: 3
+    embed_dim: 384
+    depth: 6
+    num_heads: 6
+    use_rope: false
+  
+  # RoPE vs sincos comparison tests
+  rope_comparison:
+    batch_size: 1
+    img_size: [224, 224]
+    patch_size: 16
+    in_chans: 3
+    embed_dim: 384
+    depth: 4
+    num_heads: 6
+  
+  # Predefined model variants to test
+  model_variants:
+    test_variants: ['vit_tiny', 'vit_small', 'vit_base']
+    batch_size: 1
+    img_size: [224, 224]
+    in_chans: 3
+
+# VisionTransformerPredictor (First Stage) test configurations
+predictor_first_stage:
+  # Basic predictor tests
+  basic_tests:
+    batch_size: 2
+    img_size: [224, 224]
+    patch_size: 16
+    embed_dim: 768
+    predictor_embed_dim: 384
+    depth: 6
+    num_heads: 12
+    use_mask_tokens: true
+    num_mask_tokens: 2
+    use_rope: false
+    # Masking ratios
+    context_ratio: 0.5  # Use 50% of patches as context
+    target_ratio: 0.5   # Use 50% of patches as targets
+  
+  # Video mode tests
+  video_tests:
+    batch_size: 1
+    img_size: [112, 112]  # Smaller for faster testing
+    patch_size: 16
+    num_frames: 4
+    tubelet_size: 2
+    embed_dim: 384
+    predictor_embed_dim: 192
+    depth: 4
+    num_heads: 6
+    use_mask_tokens: true
+    use_rope: false
+    # Masking ratios for video
+    context_ratio: 0.33
+    target_ratio: 0.33
+
+# VisionTransformerPredictorAC (Second Stage) test configurations
+predictor_second_stage:
+  # Basic action-conditioned tests
+  basic_tests:
+    batch_size: 2
+    img_size: [224, 224]
+    patch_size: 16
+    num_frames: 4
+    tubelet_size: 2
+    embed_dim: 768
+    predictor_embed_dim: 1024
+    depth: 6
+    num_heads: 16
+    action_embed_dim: 7
+    use_rope: true
+    use_extrinsics: false
+  
+  # Tests with extrinsics
+  extrinsics_tests:
+    batch_size: 1
+    img_size: [112, 112]
+    patch_size: 16
+    num_frames: 2
+    tubelet_size: 2
+    embed_dim: 384
+    predictor_embed_dim: 512
+    depth: 4
+    num_heads: 8
+    action_embed_dim: 6
+    use_rope: true
+    use_extrinsics: true
+
+# Model integration test configurations
+integration_tests:
+  encoder_predictor_pipeline:
+    batch_size: 1
+    img_size: [224, 224]
+    patch_size: 16
+    embed_dim: 384
+    predictor_embed_dim: 192
+    encoder_depth: 4
+    predictor_depth: 4
+    num_heads: 6
+    use_rope: false
+    # Pipeline masking ratios
+    context_ratio: 0.7  # 70% as context
+    target_ratio: 0.3   # 30% as targets
+
+# Performance benchmarking (optional)
+performance:
+  # Whether to run performance tests
+  enabled: false
+  # Number of runs for averaging
+  num_runs: 5
+  # Models to benchmark
+  benchmark_models: ['vit_small', 'vit_base']
+  # Input sizes to test
+  input_sizes: 
+    - [224, 224]
+    - [384, 384]
+  batch_sizes: [1, 4, 8]
+
+# Error handling and validation
+validation:
+  # Whether to validate gradient flow
+  check_gradients: true
+  # Whether to test model serialization
+  test_serialization: true
+  # Whether to test with different dtypes
+  test_dtypes: ['float32']  # Can add 'float16', 'bfloat16'
+  # Memory usage monitoring
+  monitor_memory: false 
