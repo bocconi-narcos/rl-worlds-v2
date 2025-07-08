@@ -7,7 +7,7 @@ from stable_baselines3 import PPO
 from data.dataset import ExperienceDataset
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from data.rl_agent import create_ppo_agent, train_ppo_agent, save_ppo_agent
-from data.env_utils import ActionRepeatWrapper, ImagePreprocessingWrapper
+from data.env_utils import ActionRepeatWrapper, ImagePreprocessingWrapper, FrameStackWrapper
 
 def _load_existing_dataset(config: dict):
     """Attempts to load a pre-existing dataset based on the configuration."""
@@ -77,6 +77,9 @@ def _initialize_environment(config: dict):
     if action_repetition_k > 1:
         print(f"Applying ActionRepeatWrapper with k={action_repetition_k}.")
         env = ActionRepeatWrapper(env, action_repetition_k)
+
+    frame_stack_size = config['environment'].get('frame_stack_size')
+    env = FrameStackWrapper(env, stack_size=frame_stack_size)  # Stack 4 frames for temporal context
     
     return env, render_mode
 
@@ -189,6 +192,8 @@ def _create_and_split_datasets(episodes_data: list, config: dict):
         states, actions, rewards, next_states, stop_episodes = [], [], [], [], []
         for episode in episodes:
             for s, a, r, ns, se in episode:
+                # Add the channel dimension for compatibility with vjepa2
+                s = s.unsqueeze(0)
                 states.append(s)
                 actions.append(a)
                 rewards.append(r)
