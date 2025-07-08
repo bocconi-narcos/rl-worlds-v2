@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from src.models.utils.modules import ACBlock as Block
 from src.models.utils.modules import build_action_block_causal_attention_mask
-from src.utils.tensors import trunc_normal_
+from src.utils.fb_tensors import trunc_normal_
 
 
 class VisionTransformerPredictorAC(nn.Module):
