@@ -6,7 +6,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from timm.models.layers import drop_path
+from timm.layers import drop_path
 
 
 def build_action_block_causal_attention_mask(T, H, W, add_tokens=1):
