@@ -42,18 +42,14 @@ class VisionTransformerPredictorAC(nn.Module):
         use_activation_checkpointing=False,
         use_rope=True,
         action_embed_dim=7,
-        use_extrinsics=False,
         **kwargs
     ):
         super().__init__()
         self.is_frame_causal = is_frame_causal
-        self.use_extrinsics = use_extrinsics
 
         # Map input to predictor dimension
         self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
         self.action_encoder = nn.Linear(action_embed_dim, predictor_embed_dim, bias=True)
-        self.state_encoder = nn.Linear(action_embed_dim, predictor_embed_dim, bias=True)
-        self.extrinsics_encoder = nn.Linear(action_embed_dim - 1, predictor_embed_dim, bias=True)
 
         # Determine positional embedding
         if type(img_size) is int:
@@ -112,7 +108,7 @@ class VisionTransformerPredictorAC(nn.Module):
             grid_height = self.img_height // self.patch_size
             grid_width = self.img_width // self.patch_size
             attn_mask = build_action_block_causal_attention_mask(
-                grid_depth, grid_height, grid_width, add_tokens=3 if use_extrinsics else 2
+                grid_depth, grid_height, grid_width, add_tokens=1  # Only action tokens
             )
         self.attn_mask = attn_mask
 
@@ -133,9 +129,10 @@ class VisionTransformerPredictorAC(nn.Module):
             rescale(layer.attn.proj.weight.data, layer_id + 1)
             rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
-    def forward(self, x, actions, states, extrinsics=None):
+    def forward(self, x, actions):
         """
         :param x: context tokens
+        :param actions: action vectors
         """
         # Map tokens to predictor dimensions
         x = self.predictor_embed(x)
@@ -143,16 +140,11 @@ class VisionTransformerPredictorAC(nn.Module):
         T = N_ctxt // (self.grid_height * self.grid_width)
 
         # Interleave action tokens
-        s = self.state_encoder(states).unsqueeze(2)
         a = self.action_encoder(actions).unsqueeze(2)
         x = x.view(B, T, self.grid_height * self.grid_width, D)  # [B, T, H*W, D]
-        if self.use_extrinsics:
-            e = self.extrinsics_encoder(extrinsics).unsqueeze(2)
-            x = torch.cat([a, s, e, x], dim=2).flatten(1, 2)  # [B, T*(H*W+3), D]
-        else:
-            x = torch.cat([a, s, x], dim=2).flatten(1, 2)  # [B, T*(H*W+2), D]
+        x = torch.cat([a, x], dim=2).flatten(1, 2)  # [B, T*(H*W+1), D]
 
-        cond_tokens = 3 if self.use_extrinsics else 2
+        cond_tokens = 1  # Only action tokens
         attn_mask = self.attn_mask[: x.size(1), : x.size(1)].to(x.device, non_blocking=True)
 
         # Fwd prop
