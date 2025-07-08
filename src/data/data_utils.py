@@ -11,8 +11,8 @@ from data.env_utils import ActionRepeatWrapper, ImagePreprocessingWrapper
 
 def _load_existing_dataset(config: dict):
     """Attempts to load a pre-existing dataset based on the configuration."""
-    load_path = config['data'].get('load_path')
-    dataset_dir = config['data']['dir']
+    load_path = config['data_collection'].get('load_path')
+    dataset_dir = 'datasets/'
     env_name = config['environment']['name']
 
     if not load_path:
@@ -50,7 +50,12 @@ def _initialize_environment(config: dict):
 
     # Get environment name from config
     env_name = config['environment']['name']
-    
+
+    # if env_name starts with 'ALE-', we need to strip 
+    if env_name.startswith('ALE'):
+        import ale_py
+        gym.register_envs(ale_py)
+    print(f"Creating environment: {env_name}")
     # Determine the correct render mode
     render_mode = 'rgb_array'
     try:
@@ -92,8 +97,8 @@ def _train_agent(config: dict) -> PPO:
 
     
     env_fns = [
-        _initialize_environment(config) 
-        for _ in range(n_envs)
+    (lambda cfg=config: _initialize_environment(cfg)[0])
+    for _ in range(n_envs)
     ]
         
     vec_env = SubprocVecEnv(env_fns)
