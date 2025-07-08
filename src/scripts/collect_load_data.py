@@ -66,15 +66,8 @@ class DataCollectionPipeline:
         """
         self.logger.info(f"Loading configuration from {self.config_path}")
         
-        try:
-            self.config = load_config(self.config_path)
-        except FileNotFoundError as e:
-            self.logger.error(f"Configuration file not found: {e}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Error loading configuration: {e}")
-            raise
-            
+        self.config = load_config(self.config_path)
+        
         # Validate critical configuration parameters
         self._validate_config()
         
@@ -128,22 +121,17 @@ class DataCollectionPipeline:
         if self.config is None:
             raise RuntimeError("Configuration not loaded. Call load_configuration() first.")
         
-        try:
-            # Collect or load data using the PPO pipeline
-            self.train_dataset, self.val_dataset = collect_ppo_episodes(self.config)
-            
-            # Validate collected data
-            self._validate_datasets()
-            
-            self.logger.info("Data collection completed successfully:")
-            self.logger.info(f"  - Training samples: {len(self.train_dataset)}")
-            self.logger.info(f"  - Validation samples: {len(self.val_dataset) if self.val_dataset else 0}")
-            
-            return self.train_dataset, self.val_dataset
-            
-        except Exception as e:
-            self.logger.error(f"Error during data collection: {e}")
-            raise
+        # Collect or load data using the PPO pipeline
+        self.train_dataset, self.val_dataset = collect_ppo_episodes(self.config)
+        
+        # Validate collected data
+        self._validate_datasets()
+        
+        self.logger.info("Data collection completed successfully:")
+        self.logger.info(f"  - Training samples: {len(self.train_dataset)}")
+        self.logger.info(f"  - Validation samples: {len(self.val_dataset) if self.val_dataset else 0}")
+        
+        return self.train_dataset, self.val_dataset
     
     def _validate_datasets(self):
         """Validate that the collected datasets are properly formatted."""
@@ -151,26 +139,22 @@ class DataCollectionPipeline:
             raise ValueError("No training data was collected")
         
         # Check data integrity by sampling a few items
-        try:
-            sample_state, sample_action, sample_reward, sample_next_state = self.train_dataset[0]
+        sample_state, sample_action, sample_reward, sample_next_state = self.train_dataset[0]
+        
+        # Validate tensor shapes and types
+        expected_shape = (
+            self.config['environment']['image_height'],
+            self.config['environment']['image_width']
+        )
+        
+        if sample_state.shape[-2:] != expected_shape:
+            raise ValueError(f"State shape mismatch. Expected {expected_shape}, got {sample_state.shape[-2:]}")
             
-            # Validate tensor shapes and types
-            expected_shape = (
-                self.config['environment']['image_height'],
-                self.config['environment']['image_width']
-            )
+        if not isinstance(sample_action, torch.Tensor):
+            raise ValueError("Actions must be torch tensors")
             
-            if sample_state.shape[-2:] != expected_shape:
-                raise ValueError(f"State shape mismatch. Expected {expected_shape}, got {sample_state.shape[-2:]}")
-                
-            if not isinstance(sample_action, torch.Tensor):
-                raise ValueError("Actions must be torch tensors")
-                
-            if not isinstance(sample_reward, torch.Tensor):
-                raise ValueError("Rewards must be torch tensors")
-                
-        except Exception as e:
-            raise ValueError(f"Dataset validation failed: {e}")
+        if not isinstance(sample_reward, torch.Tensor):
+            raise ValueError("Rewards must be torch tensors")
     
     def create_dataloaders(self) -> Tuple[DataLoader, Optional[DataLoader]]:
         """
@@ -247,25 +231,20 @@ class DataCollectionPipeline:
         self.logger.info("STARTING COMPLETE DATA COLLECTION PIPELINE")
         self.logger.info("=" * 60)
         
-        try:
-            # Step 1: Load configuration
-            self.load_configuration()
-            
-            # Step 2: Collect data
-            self.collect_data()
-            
-            # Step 3: Create DataLoaders
-            train_dataloader, val_dataloader = self.create_dataloaders()
-            
-            self.logger.info("=" * 60)
-            self.logger.info("PIPELINE COMPLETED SUCCESSFULLY")
-            self.logger.info("=" * 60)
-            
-            return train_dataloader, val_dataloader
-            
-        except Exception as e:
-            self.logger.error(f"Pipeline failed: {e}")
-            raise
+        # Step 1: Load configuration
+        self.load_configuration()
+        
+        # Step 2: Collect data
+        self.collect_data()
+        
+        # Step 3: Create DataLoaders
+        train_dataloader, val_dataloader = self.create_dataloaders()
+        
+        self.logger.info("=" * 60)
+        self.logger.info("PIPELINE COMPLETED SUCCESSFULLY")
+        self.logger.info("=" * 60)
+        
+        return train_dataloader, val_dataloader
     
     def get_dataset_info(self) -> dict:
         """
@@ -328,36 +307,28 @@ def main():
     # Create and run pipeline
     pipeline = DataCollectionPipeline(args.config)
     
-    try:
-        if args.validate_only:
-            # Only validate configuration
-            pipeline.load_configuration()
-            print("✓ Configuration validation passed")
-            return
-        
-        # Run full pipeline
-        train_dataloader, val_dataloader = pipeline.run_full_pipeline()
-        
-        if args.info_only:
-            # Display dataset information
-            info = pipeline.get_dataset_info()
-            print("\n" + "=" * 50)
-            print("DATASET INFORMATION")
-            print("=" * 50)
-            for key, value in info.items():
-                print(f"{key:25}: {value}")
-        else:
-            print("\n✓ Data collection and loading completed successfully!")
-            print(f"✓ Training DataLoader ready with {len(train_dataloader)} batches")
-            if val_dataloader:
-                print(f"✓ Validation DataLoader ready with {len(val_dataloader)} batches")
+    if args.validate_only:
+        # Only validate configuration
+        pipeline.load_configuration()
+        print("✓ Configuration validation passed")
+        return
     
-    except KeyboardInterrupt:
-        print("\n⚠ Pipeline interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Pipeline failed: {e}")
-        sys.exit(1)
+    # Run full pipeline
+    train_dataloader, val_dataloader = pipeline.run_full_pipeline()
+    
+    if args.info_only:
+        # Display dataset information
+        info = pipeline.get_dataset_info()
+        print("\n" + "=" * 50)
+        print("DATASET INFORMATION")
+        print("=" * 50)
+        for key, value in info.items():
+            print(f"{key:25}: {value}")
+    else:
+        print("\n✓ Data collection and loading completed successfully!")
+        print(f"✓ Training DataLoader ready with {len(train_dataloader)} batches")
+        if val_dataloader:
+            print(f"✓ Validation DataLoader ready with {len(val_dataloader)} batches")
 
 
 if __name__ == "__main__":
