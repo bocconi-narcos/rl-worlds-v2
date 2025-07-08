@@ -371,16 +371,20 @@ class TestVisionTransformerPredictor:
             num_context = int(num_patches * cfg['context_ratio'])
             num_target = int(num_patches * cfg['target_ratio'])
             
-            x = torch.randn(cfg['batch_size'], num_context, cfg['embed_dim']).to(self.device)
+            # Create masks - each mask tensor should have shape [batch_size, K]
+            # For simplicity, we'll use just one mask (len(masks_x) = 1)
+            masks_x = [torch.stack([torch.randperm(num_patches)[:num_context] for _ in range(cfg['batch_size'])]).to(self.device)]
+            masks_y = [torch.stack([torch.randperm(num_patches)[:num_target] for _ in range(cfg['batch_size'])]).to(self.device)]
             
-            # Create masks
-            masks_x = [torch.randperm(num_patches)[:num_context] for _ in range(cfg['batch_size'])]
-            masks_y = [torch.randperm(num_patches)[:num_target] for _ in range(cfg['batch_size'])]
+            # Create input with correct shape: [batch_size * len(masks_x), N_context, embed_dim]
+            # Since len(masks_x) = 1, input shape is [batch_size, N_context, embed_dim]
+            x = torch.randn(cfg['batch_size'] * len(masks_x), num_context, cfg['embed_dim']).to(self.device)
             
             # Forward pass
             output = model(x, masks_x, masks_y)
             
-            expected_shape = (cfg['batch_size'], num_target, cfg['embed_dim'])
+            # Expected shape: [B*len(masks_x), N_target, embed_dim] = [B*B, N_target, embed_dim]
+            expected_shape = (cfg['batch_size'] * len(masks_x), num_target, cfg['embed_dim'])
             assert output.shape == expected_shape, f"Expected shape {expected_shape}, got {output.shape}"
             print(f"✓ Predictor forward test passed: context {x.shape} -> predictions {output.shape}")
     
@@ -414,14 +418,18 @@ class TestVisionTransformerPredictor:
             num_context = int(num_patches * cfg['context_ratio'])
             num_target = int(num_patches * cfg['target_ratio'])
             
-            x = torch.randn(cfg['batch_size'], num_context, cfg['embed_dim']).to(self.device)
-            masks_x = [torch.randperm(num_patches)[:num_context]]
-            masks_y = [torch.randperm(num_patches)[:num_target]]
+            # Create masks - each mask tensor should have shape [batch_size, K]
+            # For simplicity, we'll use just one mask (len(masks_x) = 1)
+            masks_x = [torch.stack([torch.randperm(num_patches)[:num_context] for _ in range(cfg['batch_size'])]).to(self.device)]
+            masks_y = [torch.stack([torch.randperm(num_patches)[:num_target] for _ in range(cfg['batch_size'])]).to(self.device)]
+            
+            # Create input with correct shape: [B*len(masks_x), N_context, embed_dim]
+            x = torch.randn(cfg['batch_size'] * len(masks_x), num_context, cfg['embed_dim']).to(self.device)
             
             # Forward pass
             output = model(x, masks_x, masks_y)
             
-            expected_shape = (cfg['batch_size'], num_target, cfg['embed_dim'])
+            expected_shape = (cfg['batch_size'] * len(masks_x), num_target, cfg['embed_dim'])
             assert output.shape == expected_shape, f"Expected shape {expected_shape}, got {output.shape}"
             print(f"✓ Video predictor test passed: {x.shape} -> {output.shape}")
 
@@ -560,17 +568,21 @@ class TestModelIntegration:
             context_size = int(num_patches * cfg['context_ratio'])
             target_size = int(num_patches * cfg['target_ratio'])
             
-            context_indices = torch.randperm(num_patches)[:context_size]
-            target_indices = torch.randperm(num_patches)[:target_size]
+            # Create masks and move to device
+            context_indices = torch.randperm(num_patches)[:context_size].to(self.device)
+            target_indices = torch.randperm(num_patches)[:target_size].to(self.device)
             
             # Step 1: Encode with masking
             encoder_output = encoder(x, masks=[context_indices])
             
-            # Step 2: Predict masked regions
+            # Step 2: Predict masked regions - predictor needs 2D masks [batch_size, K]
+            context_mask_2d = context_indices.unsqueeze(0).repeat(cfg['batch_size'], 1)
+            target_mask_2d = target_indices.unsqueeze(0).repeat(cfg['batch_size'], 1)
+            
             prediction = predictor(
                 encoder_output, 
-                masks_x=[context_indices], 
-                masks_y=[target_indices]
+                masks_x=[context_mask_2d], 
+                masks_y=[target_mask_2d]
             )
             
             expected_pred_shape = (cfg['batch_size'], target_size, cfg['embed_dim'])

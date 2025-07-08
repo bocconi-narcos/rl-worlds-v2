@@ -16,9 +16,9 @@ general:
 # Which test suites to run
 test_suites:
   vision_transformer: true
-  predictor_first_stage: false
-  predictor_second_stage: false
-  model_integration: false
+  predictor_first_stage: true
+  predictor_second_stage: true
+  model_integration: true
 
 # VisionTransformer test configurations
 vision_transformer:
