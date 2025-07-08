@@ -176,7 +176,8 @@ def _create_and_split_datasets(episodes_data: list, config: dict):
     """Shuffles, splits, and converts raw episode data into ExperienceDataset objects."""
     if not episodes_data:
         print("Warning: No data was collected. Returning empty datasets.")
-        return ExperienceDataset([], [], [], [], []), ExperienceDataset([], [], [], [], [])
+        sequence_length = config['data_collection'].get('sequence_length')
+        return ExperienceDataset([], [], [], [], sequence_length=sequence_length), ExperienceDataset([], [], [], [], sequence_length=sequence_length)
 
     random.shuffle(episodes_data)
     
@@ -189,24 +190,56 @@ def _create_and_split_datasets(episodes_data: list, config: dict):
     print(f"\nSplitting {len(episodes_data)} collected episodes into {len(train_episodes)} train and {len(val_episodes)} validation.")
 
     def flatten_episodes(episodes: list):
-        states, actions, rewards, next_states, stop_episodes = [], [], [], [], []
+        """
+        episodes: list of episodes, each an iterable of (s, a, r, ns, se)
+        where s and ns are [C=4,H,W] tensors of stacked frames.
+        Returns:
+        states: list of [1,H,W] tensors, one frame per entry
+        actions, rewards, stop_episodes: lists aligned per transition
+        """
+        states = []
+        actions = []
+        rewards = []
+        stop_episodes = []
+
         for episode in episodes:
-            for s, a, r, ns, se in episode:
-                # Add the channel dimension for compatibility with vjepa2
-                s = s.unsqueeze(0)
-                states.append(s)
+            for t, (s, a, r, ns, se) in enumerate(episode):
+                # add batch/channel dim
+                s = s.unsqueeze(0)   # shape [1,4,H,W]
+                # split into 4 frames [1,1,H,W]
+                frames = [s[:, i : i+1, :, :] for i in range(s.shape[1])]
+
+                if t == 0:
+                    # first transition: start the sequence with all 4 frames
+                    for f in frames:
+                        states.append(f)
+                else:
+                    # check that last 3 flattened frames match first 3 of new state
+                    for j in range(3):
+                        prev_f = states[-3 + j]       # the j-th frame back from the end
+                        new_f  = frames[j]            # frames[0], frames[1], frames[2]
+                        assert torch.equal(prev_f, new_f), (
+                            f"Flatten mismatch at episode start frame {j}: "
+                            "previous flattened frame must equal corresponding new state frame"
+                        )
+                    # append only the new (4th) frame
+                    states.append(frames[3])
+
+                # record the transition-level items
                 actions.append(a)
                 rewards.append(r)
-                next_states.append(ns)
                 stop_episodes.append(se)
-        return states, actions, rewards, next_states, stop_episodes
 
-    train_s, train_a, train_r, train_ns, train_se = flatten_episodes(train_episodes)
-    val_s, val_a, val_r, val_ns, val_se = flatten_episodes(val_episodes)
+        return states, actions, rewards, stop_episodes
+
+    train_s, train_a, train_r, train_se = flatten_episodes(train_episodes)
+    val_s, val_a, val_r, val_se = flatten_episodes(val_episodes)
+
+    sequence_length = config['data_collection'].get('sequence_length')
     
     # Data is already preprocessed, so transform is None
-    train_dataset = ExperienceDataset(train_s, train_a, train_r, train_ns, train_se)
-    val_dataset = ExperienceDataset(val_s, val_a, val_r, val_ns, val_se)
+    train_dataset = ExperienceDataset(train_s, train_a, train_r, train_se, sequence_length=sequence_length)
+    val_dataset = ExperienceDataset(val_s, val_a, val_r, val_se, sequence_length=sequence_length)
 
     print(f"Created training dataset with {len(train_dataset)} transitions.")
     print(f"Created validation dataset with {len(val_dataset)} transitions.")
