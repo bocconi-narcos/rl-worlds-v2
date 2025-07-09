@@ -1,0 +1,52 @@
+# Autoencoder Pre-training Configuration for V-JEPA Architecture
+
+# Data configuration
+data:
+  train_data_dir: "data/train"
+  val_data_dir: "data/val"
+  img_size: [224, 224]
+  num_frames: 16
+  patch_size: 16
+  tubelet_size: 2
+  grayscale: true
+  batch_size: 8
+  num_workers: 4
+
+# Model architecture parameters
+img_size: [224, 224]
+patch_size: 16
+num_frames: 16
+tubelet_size: 2
+in_chans: 1  # Greyscale
+embed_dim: 768
+predictor_embed_dim: 384
+decoder_embed_dim: 768
+
+# Architecture depths
+encoder_depth: 12
+predictor_depth: 6
+decoder_depth: 12
+num_heads: 12
+mlp_ratio: 4.0
+
+# Autoencoder pre-training specific configuration
+autoencoder_pretrain:
+  masking_ratio: 0.75  # JEPA masking ratio (75% of tokens masked)
+  num_epochs: 100
+  learning_rate: 0.0001
+  weight_decay: 0.05
+  early_stopping_patience: 10
+  gradient_clip_norm: 1.0
+
+# Logging and monitoring
+logging:
+  wandb_project: "vjepa-autoencoder-pretrain"
+  wandb_entity: null  # Set to your wandb username if needed
+  log_interval: 10  # Log every N batches
+  save_interval: 5   # Save checkpoint every N epochs
+
+# Hardware and optimization
+hardware:
+  mixed_precision: true
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0 
