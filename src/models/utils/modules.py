@@ -564,7 +564,7 @@ class Block(nn.Module):
 
 
 class CrossAttention(nn.Module):
-    def __init__(self, dim, num_heads=12, qkv_bias=False, use_sdpa=True):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, use_sdpa=True, is_causal=False):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -573,8 +573,9 @@ class CrossAttention(nn.Module):
         self.kv = nn.Linear(dim, int(dim * 2), bias=qkv_bias)
         # self.proj = nn.Linear(dim, dim)
         self.use_sdpa = use_sdpa
+        self.is_causal = is_causal
 
-    def forward(self, q, x):
+    def forward(self, q, x, attn_mask=None):
         B, n, C = q.shape
         q = self.q(q).reshape(B, n, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
 
@@ -584,9 +585,11 @@ class CrossAttention(nn.Module):
 
         if self.use_sdpa:
             with torch.backends.cuda.sdp_kernel():
-                q = F.scaled_dot_product_attention(q, k, v)
+                q = F.scaled_dot_product_attention(q, k, v, is_causal=self.is_causal, attn_mask=attn_mask)
         else:
             xattn = (q @ k.transpose(-2, -1)) * self.scale
+            if attn_mask is not None:
+                xattn = xattn.masked_fill(attn_mask, float('-inf'))
             xattn = xattn.softmax(dim=-1)  # (batch_size, num_heads, query_len, seq_len)
             q = xattn @ v
 
