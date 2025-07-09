@@ -35,8 +35,13 @@ class ExperienceDataset(Dataset):
         start = self.valid_start_indices[idx]
 
         state = self.states[:, start:start + self.sequence_length - 1, :, :]
-        next_state = self.states[:, start + self.sequence_length, :, :]
+        next_state = self.states[:, start + self.sequence_length, :, :].unsqueeze(1)
         action = self.actions[start:start + self.sequence_length - 1]
         reward = self.rewards[start:start + self.sequence_length - 1]
 
+        # Assert all outputs are tensors
+        assert isinstance(state, torch.Tensor), "State must be a tensor"
+        assert isinstance(next_state, torch.Tensor), "Next state must be a tensor"
+        assert isinstance(action, torch.Tensor), "Action must be a tensor"
+        assert isinstance(reward, torch.Tensor), "Reward must be a tensor"
         return state, next_state, action, reward
