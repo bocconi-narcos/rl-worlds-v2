@@ -123,6 +123,8 @@ class DataCollectionPipeline:
         
         # Collect or load data using the PPO pipeline
         self.train_dataset, self.val_dataset = collect_ppo_episodes(self.config)
+
+        print('dataset lengths: ', len(self.train_dataset), len(self.val_dataset) if self.val_dataset else 0)
         
         # Validate collected data
         self._validate_datasets()
@@ -179,8 +181,10 @@ class DataCollectionPipeline:
         num_workers = training_config['num_workers']
         
         # Determine optimal DataLoader settings
-        pin_memory = torch.cuda.is_available() or torch.backends.mps.is_available()
+        pin_memory = torch.cuda.is_available() 
         persistent_workers = num_workers > 0
+
+        print('len(train_dataset): ', len(self.train_dataset))
         
         # Create training DataLoader
         self.train_dataloader = DataLoader(
@@ -236,9 +240,12 @@ class DataCollectionPipeline:
         
         # Step 2: Collect data
         self.collect_data()
+
+        
         
         # Step 3: Create DataLoaders
         train_dataloader, val_dataloader = self.create_dataloaders()
+
         
         self.logger.info("=" * 60)
         self.logger.info("PIPELINE COMPLETED SUCCESSFULLY")
