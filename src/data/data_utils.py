@@ -189,46 +189,36 @@ def _create_and_split_datasets(episodes_data: list, config: dict):
     
     print(f"\nSplitting {len(episodes_data)} collected episodes into {len(train_episodes)} train and {len(val_episodes)} validation.")
 
-    def flatten_episodes(episodes: list):
-        """
-        episodes: list of episodes, each an iterable of (s, a, r, ns, se)
-        where s and ns are [C=4,H,W] tensors of stacked frames.
-        Returns:
-        states: list of [1,H,W] tensors, one frame per entry
-        actions, rewards, stop_episodes: lists aligned per transition
-        """
+    def flatten_episodes(episodes):
         states = []
         actions = []
         rewards = []
         stop_episodes = []
 
         for episode in episodes:
-            for t, (s, a, r, ns, se) in enumerate(episode):
-                # add batch/channel dim
-                s = s.unsqueeze(0)   # shape [1,4,H,W]
-                # split into 4 frames [1,1,H,W]
-                frames = [s[:, i : i+1, :, :] for i in range(s.shape[1])]
+            for idx, (s, a, r, ns, se) in enumerate(episode):
+                # if it is the last transition of the episode, make se True
 
-                if t == 0:
-                    # first transition: start the sequence with all 4 frames
-                    for f in frames:
-                        states.append(f)
-                else:
-                    # check that last 3 flattened frames match first 3 of new state
-                    for j in range(3):
-                        prev_f = states[-3 + j]       # the j-th frame back from the end
-                        new_f  = frames[j]            # frames[0], frames[1], frames[2]
-                        assert torch.equal(prev_f, new_f), (
-                            f"Flatten mismatch at episode start frame {j}: "
-                            "previous flattened frame must equal corresponding new state frame"
-                        )
-                    # append only the new (4th) frame
-                    states.append(frames[3])
 
-                # record the transition-level items
+                s = s.unsqueeze(0)  # Add channel dimension
+                state = s[:, -1, :, :]
+                a = torch.tensor(a, dtype=torch.float32)
+                r = torch.tensor(r, dtype=torch.float32)
+                states.append(state.unsqueeze(0))
                 actions.append(a)
                 rewards.append(r)
+                if idx == len(episode) - 1:
+                    se = True
                 stop_episodes.append(se)
+
+                if se:
+                    actions.append(a)  # Append action for the last transition
+                    rewards.append(r)  # Append reward for the last transition
+                    ns.unsqueeze_(0)  # Add channel dimension for next state
+                    next_state = ns[:, -1, :, :]
+                    states.append(next_state.unsqueeze(0))
+
+                #assert False
 
         return states, actions, rewards, stop_episodes
 
@@ -329,6 +319,9 @@ def collect_ppo_episodes(config):
 
     # 5. Create and split datasets from the collected raw data
     train_dataset, val_dataset = _create_and_split_datasets(raw_episodes, config)
+
+    print('len(train_dataset) in ppo: ', len(train_dataset))
+    print('len(val_dataset) in ppo: ', len(val_dataset) if val_dataset else 0)
 
     # 6. Save the new datasets if any data was collected
     if len(train_dataset) > 0 or len(val_dataset) > 0:
