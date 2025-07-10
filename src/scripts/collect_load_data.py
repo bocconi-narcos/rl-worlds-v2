@@ -239,9 +239,7 @@ class DataCollectionPipeline:
         self.load_configuration()
         
         # Step 2: Collect data
-        self.collect_data()
-
-        
+        self.collect_data()        
         
         # Step 3: Create DataLoaders
         train_dataloader, val_dataloader = self.create_dataloaders()
