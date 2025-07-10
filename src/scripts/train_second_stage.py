@@ -204,9 +204,9 @@ def train_vjepa_mps(
                     B, N_total, D = h.shape
                     actual_tokens_per_frame = N_total // max_num_frames
                     
-                    # Get target tokens for the last frame
-                    last_frame_start = (max_num_frames - 1) * actual_tokens_per_frame
-                    _h = h[:, last_frame_start:last_frame_start + z.size(1)]
+                    # Get target tokens starting from frame 1 (second frame)
+                    # This properly aligns with auto-regressive predictions
+                    _h = h[:, actual_tokens_per_frame : z.size(1) + actual_tokens_per_frame]
                     return torch.mean(torch.abs(z - _h) ** loss_exp) / loss_exp
                 
                 # Forward pass with autocast for mixed precision
