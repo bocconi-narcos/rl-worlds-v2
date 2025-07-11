@@ -1,6 +1,5 @@
 import torch
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
-from src.utils.wrappers import MultiSeqWrapper, PredictorMultiSeqWrapper
 import src.models.predictor_first_stage as vit_pred
 import src.models.vision_transformer as video_vit
 
@@ -93,7 +92,7 @@ def init_video_model(
     wide_silu=False,  
     use_activation_checkpointing=False,  
 ):  
-    print('[setups] Initialising video model with max_num_frames:', max_num_frames,)
+
     encoder = video_vit.__dict__[model_name](  
         img_size=crop_size,  
         patch_size=patch_size,  
