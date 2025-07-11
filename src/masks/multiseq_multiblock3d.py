@@ -1,239 +1,266 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-
-import math
-from logging import getLogger
-from multiprocessing import Value
-
 import torch
+class oldMaskGenerator:
+    """
+    A simplified, self-contained class for generating random block masks for
+    batches of images or videos.
 
-_GLOBAL_SEED = 0
-logger = getLogger()
+    This class generates a binary mask for each item in a batch. A value of '1'
+    in the mask indicates a patch is visible, and '0' indicates it is masked.
+    The masking is performed by creating a specified number of random blocks
+    and setting their locations to zero.
 
-
-class MaskCollator(object):
-
-    def __init__(
-        self,
-        cfgs_mask,
-        dataset_fpcs,
-        crop_size=(224, 224),
-        patch_size=(16, 16),
-        tubelet_size=2,
-    ):
-        super(MaskCollator, self).__init__()
-
-        self.mask_generators = dict()
-        for fpc in dataset_fpcs:
-            self.mask_generators[fpc] = []
-            for m in cfgs_mask:
-                mask_generator = _MaskGenerator(
-                    crop_size=crop_size,
-                    num_frames=fpc,
-                    spatial_patch_size=patch_size,
-                    temporal_patch_size=tubelet_size,
-                    spatial_pred_mask_scale=m.get("spatial_scale"),
-                    temporal_pred_mask_scale=m.get("temporal_scale"),
-                    aspect_ratio=m.get("aspect_ratio"),
-                    npred=m.get("num_blocks"),
-                    max_context_frames_ratio=m.get("max_temporal_keep", 1.0),
-                    max_keep=m.get("max_keep", None),
-                    full_complement=m.get("full_complement", False),
-                    pred_full_complement=m.get("pred_full_complement", False),
-                    inv_block=m.get("inv_block", False),
-                )
-                self.mask_generators[fpc].append(mask_generator)
-
-    def step(self):
-        for fpc in self.mask_generators:
-            for mask_generator in self.mask_generators[fpc]:
-                mask_generator.step()
-
-    def __call__(self, batch):
-
-        # Batch: [buffer, label, clip_indices]
-        filtered_batches = {fpc: [] for fpc in self.mask_generators}
-        for sample in batch:
-            fpc = len(sample[-1][-1])
-            filtered_batches[fpc] += [sample]
-
-        fpc_collations = []
-        for fpc in filtered_batches:
-            fpc_batch = filtered_batches[fpc]
-            batch_size = len(fpc_batch)
-            if batch_size == 0:
-                continue
-            collated_batch = torch.utils.data.default_collate(fpc_batch)
-            collated_masks_pred, collated_masks_enc = [], []
-            for i, mask_generator in enumerate(self.mask_generators[fpc]):
-                masks_enc, masks_pred = mask_generator(batch_size)
-                collated_masks_enc.append(masks_enc)
-                collated_masks_pred.append(masks_pred)
-            fpc_collations += [(collated_batch, collated_masks_enc, collated_masks_pred)]
-
-        return fpc_collations
-
-
-class _MaskGenerator(object):
+    Attributes:
+        input_size (tuple): The dimensions of the input data (T, H, W) for videos
+                            or (H, W) for images.
+        patch_size (tuple): The size of each patch (P_t, P_h, P_w) for videos or
+                            (P_h, P_w) for images.
+        num_blocks (int): The number of masking blocks to generate per sample.
+        masking_ratio (float): The approximate fraction of total patches to mask.
+        is_video (bool): Flag indicating if the input is video data.
+        grid_size (tuple): The dimensions of the input in terms of patches.
+        total_patches (int): The total number of patches in the grid.
+        patches_per_block (int): The number of patches to include in each block.
+    """
 
     def __init__(
         self,
-        crop_size=(224, 224),
-        num_frames=16,
-        spatial_patch_size=(16, 16),
-        temporal_patch_size=2,
-        spatial_pred_mask_scale=(0.2, 0.8),
-        temporal_pred_mask_scale=(1.0, 1.0),
-        aspect_ratio=(0.3, 3.0),
-        npred=1,
-        max_context_frames_ratio=1.0,
-        max_keep=None,
-        inv_block=False,
-        full_complement=False,
-        pred_full_complement=False,
+        input_size,
+        patch_size,
+        num_blocks=1,
+        masking_ratio=0.5,
     ):
-        super(_MaskGenerator, self).__init__()
-        if not isinstance(crop_size, tuple):
-            crop_size = (crop_size,) * 2
-        if not isinstance(spatial_patch_size, tuple):
-            spatial_patch_size = (spatial_patch_size,) * 2
-        self.crop_size = crop_size
-        self.height, self.width = [crop_size[i] // spatial_patch_size[i] for i in (0, 1)]
-        self.duration = num_frames // temporal_patch_size
-        self.full_complement = full_complement
-        self.pred_full_complement = pred_full_complement
+        
+        raise DeprecationWarning("This class is deprecated.")
+        """
+        Initializes the MaskGenerator.
 
-        self.spatial_patch_size = spatial_patch_size
-        self.temporal_patch_size = temporal_patch_size
+        Args:
+            input_size (tuple): The size of the input data. Should be a tuple of
+                                (height, width) for images or
+                                (frames, height, width) for videos.
+            patch_size (tuple): The size of each patch. Should be a tuple of
+                                (patch_h, patch_w) for images or
+                                (patch_t, patch_h, patch_w) for videos.
+            num_blocks (int, optional): The number of masking blocks to generate.
+                                        Defaults to 1.
+            masking_ratio (float, optional): The target fraction of patches to mask.
+                                             Must be between 0 and 1. Defaults to 0.5.
+        """
+        if not (0 < masking_ratio < 1):
+            raise ValueError("masking_ratio must be between 0 and 1.")
 
-        self.aspect_ratio = aspect_ratio
-        self.spatial_pred_mask_scale = spatial_pred_mask_scale
-        self.temporal_pred_mask_scale = temporal_pred_mask_scale
-        self.npred = npred
-        self.max_context_duration = max(
-            1, int(self.duration * max_context_frames_ratio)
-        )  # maximum number of time-steps (frames) spanned by context mask
-        self.max_keep = max_keep  # maximum number of patches to keep in context
-        self._itr_counter = Value("i", -1)  # collator is shared across worker processes
-        self.inv_block = inv_block
+        self.is_video = (len(input_size) == 3)
+        if self.is_video:
+            if len(patch_size) != 3:
+                raise ValueError("Patch size must have 3 dimensions for video data (t, h, w).")
+            self.input_size = input_size
+            self.patch_size = patch_size
+            self.grid_size = (
+                input_size[0] // patch_size[0],
+                input_size[1] // patch_size[1],
+                input_size[2] // patch_size[2],
+            )
+        else:
+            if len(input_size) != 2 or len(patch_size) != 2:
+                raise ValueError("Input and patch size must have 2 dimensions for image data (h, w).")
+            # Prepend a temporal dimension of 1 for consistent logic
+            self.input_size = (1,) + input_size
+            self.patch_size = (1,) + patch_size
+            self.grid_size = (
+                1,
+                input_size[0] // patch_size[0],
+                input_size[1] // patch_size[1],
+            )
 
-    def step(self):
-        i = self._itr_counter
-        with i.get_lock():
-            i.value += 1
-            v = i.value
-        return v
+        self.num_blocks = num_blocks
+        self.masking_ratio = masking_ratio
 
-    def _sample_block_size(self, generator, temporal_scale, spatial_scale, aspect_ratio_scale):
-        # -- Sample temporal block mask scale
-        _rand = torch.rand(1, generator=generator).item()
-        min_t, max_t = temporal_scale
-        temporal_mask_scale = min_t + _rand * (max_t - min_t)
-        t = max(1, int(self.duration * temporal_mask_scale))
+        self.total_patches = self.grid_size[0] * self.grid_size[1] * self.grid_size[2]
+        num_masked_patches = int(self.total_patches * self.masking_ratio)
 
-        # -- Sample spatial block mask scale
-        _rand = torch.rand(1, generator=generator).item()
-        min_s, max_s = spatial_scale
-        spatial_mask_scale = min_s + _rand * (max_s - min_s)
-        spatial_num_keep = int(self.height * self.width * spatial_mask_scale)
+        if self.total_patches == 0:
+            raise ValueError("Input size is smaller than patch size in at least one dimension.")
 
-        # -- Sample block aspect-ratio
-        _rand = torch.rand(1, generator=generator).item()
-        min_ar, max_ar = aspect_ratio_scale
-        aspect_ratio = min_ar + _rand * (max_ar - min_ar)
+        # Ensure at least one patch is masked per block
+        self.patches_per_block = max(1, num_masked_patches // self.num_blocks)
 
-        # -- Compute block height and width (given scale and aspect-ratio)
-        h = int(round(math.sqrt(spatial_num_keep * aspect_ratio)))
-        w = int(round(math.sqrt(spatial_num_keep / aspect_ratio)))
-        h = min(h, self.height)
-        w = min(w, self.width)
+    def _generate_block_mask(self):
+        """Generates a single mask with random blocks."""
+        mask = torch.ones(self.grid_size, dtype=torch.int32)
 
-        return (t, h, w)
+        for _ in range(self.num_blocks):
+            # 1. Determine the shape of the masking block
+            # We approximate the block volume and find integer factors.
+            # This is a simplified version of the aspect ratio logic.
+            target_volume = self.patches_per_block
+            
+            # Sample block dimensions
+            block_t = torch.randint(1, self.grid_size[0] + 1, (1,)).item()
+            block_h = torch.randint(1, self.grid_size[1] + 1, (1,)).item()
+            block_w = torch.randint(1, self.grid_size[2] + 1, (1,)).item()
 
-    def _sample_block_mask(self, b_size):
-        t, h, w = b_size
-        top = torch.randint(0, self.height - h + 1, (1,))
-        left = torch.randint(0, self.width - w + 1, (1,))
-        start = torch.randint(0, self.duration - t + 1, (1,))
+            # Scale dimensions to approximate target volume
+            scale = (target_volume / (block_t * block_h * block_w)) ** (1/3)
+            block_t = min(self.grid_size[0], max(1, int(block_t * scale)))
+            block_h = min(self.grid_size[1], max(1, int(block_h * scale)))
+            block_w = min(self.grid_size[2], max(1, int(block_w * scale)))
 
-        mask = torch.ones((self.duration, self.height, self.width), dtype=torch.int32)
-        mask[start : start + t, top : top + h, left : left + w] = 0
+            # 2. Determine the top-left-front position of the block
+            start_t = torch.randint(0, self.grid_size[0] - block_t + 1, (1,)).item()
+            start_h = torch.randint(0, self.grid_size[1] - block_h + 1, (1,)).item()
+            start_w = torch.randint(0, self.grid_size[2] - block_w + 1, (1,)).item()
 
-        # Context mask will only span the first X frames
-        # (X=self.max_context_frames)
-        if self.max_context_duration < self.duration:
-            mask[self.max_context_duration :, :, :] = 0
+            # 3. Apply the mask
+            mask[
+                start_t : start_t + block_t,
+                start_h : start_h + block_h,
+                start_w : start_w + block_w,
+            ] = 0
 
-        # --
         return mask
 
     def __call__(self, batch_size):
         """
-        Create encoder and predictor masks when collating imgs into a batch
-        # 1. sample pred block size using seed
-        # 2. sample several pred block locations for each image (w/o seed)
-        # 3. return pred masks and complement (enc mask)
+        Generates a batch of masks.
+
+        Args:
+            batch_size (int): The number of masks to generate for the batch.
+
+        Returns:
+            torch.Tensor: A tensor of masks.
+                          Shape for images: (batch_size, grid_h, grid_w).
+                          Shape for videos: (batch_size, grid_t, grid_h, grid_w).
         """
-        seed = self.step()
-        g = torch.Generator()
-        g.manual_seed(seed)
-        p_size = self._sample_block_size(
-            generator=g,
-            temporal_scale=self.temporal_pred_mask_scale,
-            spatial_scale=self.spatial_pred_mask_scale,
-            aspect_ratio_scale=self.aspect_ratio,
-        )
+        batch_masks = [self._generate_block_mask() for _ in range(batch_size)]
+        
+        collated_masks = torch.stack(batch_masks)
 
-        collated_masks_pred, collated_masks_enc = [], []
-        min_keep_enc = min_keep_pred = self.duration * self.height * self.width
-        for _ in range(batch_size):
+        # Remove the temporal dimension for image data
+        if not self.is_video:
+            collated_masks = collated_masks.squeeze(1)
 
-            empty_context = True
-            while empty_context:
+        return collated_masks
+    
 
-                mask_e = torch.ones((self.duration, self.height, self.width), dtype=torch.int32)
-                for _ in range(self.npred):
-                    mask_e *= self._sample_block_mask(p_size)
-                mask_e = mask_e.flatten()
+import torch
+import math
 
-                mask_p = torch.argwhere(mask_e == 0).squeeze()
-                mask_e = torch.nonzero(mask_e).squeeze()
+import math
+import random
+from typing import Tuple, Union
 
-                empty_context = len(mask_e) == 0
-                if not empty_context:
-                    min_keep_pred = min(min_keep_pred, len(mask_p))
-                    min_keep_enc = min(min_keep_enc, len(mask_e))
-                    collated_masks_pred.append(mask_p)
-                    collated_masks_enc.append(mask_e)
+import torch
 
-        if self.max_keep is not None:
-            min_keep_enc = min(min_keep_enc, self.max_keep)
 
-        collated_masks_enc = [cm[:min_keep_enc] for cm in collated_masks_enc]
-        collated_masks_pred = [cm[:min_keep_pred] for cm in collated_masks_pred]
-        if self.full_complement:  # predictor mask is just complement of encoder mask
-            collated_masks_pred = [
-                torch.tensor(
-                    sorted(list(set(range(int(self.duration * self.height * self.width))) - set(cm.tolist()))),
-                    dtype=cm.dtype,
-                )
-                for cm in collated_masks_enc
-            ]
-        elif self.pred_full_complement:
-            collated_masks_enc = [
-                torch.tensor(
-                    sorted(list(set(range(int(self.duration * self.height * self.width))) - set(cm.tolist()))),
-                    dtype=cm.dtype,
-                )
-                for cm in collated_masks_pred
-            ]
+import math
+import torch
+from typing import Tuple, Union
 
-        collated_masks_enc = torch.utils.data.default_collate(collated_masks_enc)
-        collated_masks_pred = torch.utils.data.default_collate(collated_masks_pred)
+class MaskGenerator:
+    """
+    A simplified random block mask generator for images or videos.
 
-        if self.inv_block:
-            return collated_masks_pred, collated_masks_enc  # predict context from block
+    This class generates a boolean mask to be applied to a batch of data.
+    The mask indicates which patches to keep (`True`) and which to mask out (`False`).
+    It is designed to be easily integrated into a PyTorch training loop.
+
+    Args:
+        input_size (tuple): The size of the input data. Should be a tuple of
+                            (height, width) for images or
+                            (frames, height, width) for videos.
+        patch_size (tuple): The size of each patch. Should be a tuple of
+                            (patch_h, patch_w) for images or
+                            (patch_t, patch_h, patch_w) for videos.
+        num_blocks (int, optional): The number of masking blocks to generate.
+                                    Defaults to 1.
+        masking_ratio (float, optional): The target fraction of patches to mask.
+                                           Must be between 0 and 1. Defaults to 0.5.
+    """
+    def __init__(self, input_size, patch_size, num_blocks=1, masking_ratio=0.5):
+        if not (0 < masking_ratio < 1):
+            raise ValueError("masking_ratio must be between 0 and 1.")
+
+        self.is_video = len(input_size) == 3
+        self.input_size = input_size
+        self.patch_size = patch_size
+        self.num_blocks = num_blocks
+        self.masking_ratio = masking_ratio
+
+        if self.is_video:
+            self.frames, self.height, self.width = self.input_size
+            self.patch_t, self.patch_h, self.patch_w = self.patch_size
+            self.num_patches_t = self.frames // self.patch_t
         else:
-            return collated_masks_enc, collated_masks_pred
+            self.height, self.width = self.input_size
+            self.patch_h, self.patch_w = self.patch_size
+            self.num_patches_t = 1
+            self.patch_t = 1
+
+
+        self.num_patches_h = self.height // self.patch_h
+        self.num_patches_w = self.width // self.patch_w
+        self.total_patches = self.num_patches_t * self.num_patches_h * self.num_patches_w
+
+    def __call__(self, batch_size):
+        """
+        Generates a batch of masks.
+
+        Args:
+            batch_size (int): The number of samples in the batch.
+
+        Returns:
+            torch.Tensor: A boolean tensor of shape `[B, N]`, where `B` is the
+                          batch size and `N` is the total number of patches.
+                          `True` indicates a patch to keep. All rows in the
+                          batch will have the same number of `True` values.
+        """
+        all_masks = []
+        for _ in range(batch_size):
+            mask = torch.ones(self.num_patches_t, self.num_patches_h, self.num_patches_w, dtype=torch.bool)
+            num_masked_patches = 0
+            for _ in range(self.num_blocks):
+                # Determine block size
+                target_masked_for_block = int(self.total_patches * self.masking_ratio / self.num_blocks)
+                if self.is_video:
+                    block_t = torch.randint(1, self.num_patches_t + 1, (1,)).item()
+                    block_h = torch.randint(1, self.num_patches_h + 1, (1,)).item()
+                    block_w = int(target_masked_for_block / (block_t * block_h))
+                    block_w = max(1, min(block_w, self.num_patches_w))
+
+                else:
+                    block_t = 1
+                    aspect_ratio = torch.rand(1).item() * 2 + 0.5  # Random aspect ratio
+                    block_h = int(math.sqrt(target_masked_for_block * aspect_ratio))
+                    block_w = int(math.sqrt(target_masked_for_block / aspect_ratio))
+                    block_h = max(1, min(block_h, self.num_patches_h))
+                    block_w = max(1, min(block_w, self.num_patches_w))
+
+
+                # Determine block position
+                start_t = torch.randint(0, self.num_patches_t - block_t + 1, (1,)).item() if self.is_video else 0
+                start_h = torch.randint(0, self.num_patches_h - block_h + 1, (1,)).item()
+                start_w = torch.randint(0, self.num_patches_w - block_w + 1, (1,)).item()
+
+                # Apply mask
+                mask[start_t:start_t + block_t, start_h:start_h + block_h, start_w:start_w + block_w] = False
+            all_masks.append(mask.flatten())
+
+        # Find the minimum number of kept patches across all masks in the batch
+        kept_patches_counts = [m.sum().item() for m in all_masks]
+        min_kept_patches = min(kept_patches_counts)
+
+        # Adjust each mask to have the same number of kept patches
+        final_masks = []
+        for mask in all_masks:
+            kept_indices = torch.where(mask)[0]
+            
+            # Randomly select which patches to keep from the available set
+            shuffled_indices = kept_indices[torch.randperm(len(kept_indices))]
+            trimmed_indices = shuffled_indices[:min_kept_patches]
+
+            # Create the final mask with the exact number of kept patches
+            new_mask = torch.zeros_like(mask, dtype=torch.bool)
+            new_mask[trimmed_indices] = True
+            final_masks.append(new_mask)
+            
+        return torch.stack(final_masks)
