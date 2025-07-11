@@ -198,38 +198,29 @@ class VisionTransformer(nn.Module):
             x += pos_embed
         else:
             x = self.patch_embed(x)
-        print('[vision_transformer.py] x shape after patch embedding:', x.shape)
 
         # Mask away unwanted tokens (if masks provided)
         if masks is not None:
             x = apply_masks(x, masks)
             masks = torch.cat(masks, dim=0)
-        print('[vision_transformer.py] x shape after applying masks:', x.shape)
-        print('[vision_transformer.py] masks shape:', masks.shape if masks is not None else 'None')
 
         # Fwd prop
         outs = []
         for i, blk in enumerate(self.blocks):
-            print(f'[vision_transformer.py] Block {i} input shape: {x.shape}')
             if self.use_activation_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(
                     blk, x, masks, None, T=T, H_patches=H_patches, W_patches=W_patches, use_reentrant=False
                 )
-                print(f'[vision_transformer.py] Block {i} output shape: {x.shape}')
             else:
                 x = blk(x, mask=masks, attn_mask=None, T=T, H_patches=H_patches, W_patches=W_patches)
-                print(f'[vision_transformer.py] Block {i} output shape: {x.shape}')
             if self.out_layers is not None and i in self.out_layers:
                 outs.append(self.norm(x))
 
         if self.out_layers is not None:
-            print('[vision_transformer.py] Returning outputs from specified layers:', self.out_layers)
             return outs
 
         if self.norm is not None:
             x = self.norm(x)
-
-        print('[vision_transformer.py] Final output shape:', x.shape)
 
         return x
 
