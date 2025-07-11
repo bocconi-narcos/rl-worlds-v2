@@ -195,6 +195,7 @@ class VisionTransformerPredictor(nn.Module):
         pred_tokens = self.mask_tokens[mask_index]
         pred_tokens = pred_tokens.repeat(B, self.num_patches, 1)
         pred_tokens = apply_masks(pred_tokens, masks_y)
+
         # -- add pos embed
         if not self.use_rope:
             pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
