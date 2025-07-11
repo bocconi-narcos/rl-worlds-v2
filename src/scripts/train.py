@@ -4,9 +4,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.utils.setups import init_opt, init_video_model
+from src.utils.setups import init_opt, init_video_model, init_mask_generator
 from src.scripts.collect_load_data import DataCollectionPipeline
-from src.masks.multiseq_multiblock3d import MaskCollator
 from src.masks.utils import apply_masks
 
 _GLOBAL_SEED = 0
@@ -44,6 +43,10 @@ def main(args, resume_preempt=False):
 
     # -- MASK
     cfgs_mask = args.get("mask")
+    input_size = cfgs_mask.get("input_size", (6, 224, 224))  # Default input size
+    patch_size_mask = cfgs_mask.get("patch_size", (2, 16, 16))  # Default patch size
+    masking_ratio = cfgs_mask.get("masking_ratio", 0.5)  # Use first mask config for ratio
+
 
     # -- MODEL
     cfgs_model = args.get("model")
@@ -65,7 +68,7 @@ def main(args, resume_preempt=False):
     cfgs_data = args.get("data")
     batch_size = cfgs_data.get("batch_size")
     tubelet_size = cfgs_data.get("tubelet_size")
-    crop_size = cfgs_data.get("crop_size", 224)
+    crop_size = cfgs_data.get("crop_size")
     patch_size = cfgs_data.get("patch_size")
     
     # Placeholder values for removed distributed params
@@ -74,7 +77,6 @@ def main(args, resume_preempt=False):
 
     # -- OPTIMIZATION
     cfgs_opt = args.get("optimization")
-    ipe = cfgs_opt.get("ipe", None)
     wd = float(cfgs_opt.get("weight_decay"))
     num_epochs = cfgs_opt.get("epochs")
     warmup_epochs = cfgs_opt.get("warmup_epochs")
@@ -93,11 +95,15 @@ def main(args, resume_preempt=False):
     device = get_device()
     print(f"Using device: {device}")
 
+    print("Pred embedding dimension:", pred_embed_dim)
+    print("patch size:", patch_size)
+    print("tubelet size:", tubelet_size)
+
     # -- init model
     encoder, predictor = init_video_model(
         uniform_power=uniform_power,
         use_mask_tokens=use_mask_tokens,
-        num_mask_tokens=int(len(cfgs_mask) * len(dataset_fpcs)),
+        num_mask_tokens=1,
         zero_init_mask_tokens=zero_init_mask_tokens,
         device=device,
         patch_size=patch_size,
@@ -127,12 +133,9 @@ def main(args, resume_preempt=False):
     # -- Load data using collect_load_data.py
     data_pipeline = DataCollectionPipeline()
     train_dataloader, val_dataloader = data_pipeline.run_full_pipeline()
+
+    print(f"Training dataloader length: {len(train_dataloader)}")
     
-    # Get data length for optimizer initialization
-    _dlen = len(train_dataloader)
-    if ipe is None:
-        ipe = _dlen
-    print(f"iterations per epoch/dataset length: {ipe}/{_dlen}")
 
     # -- init optimizer and scheduler
     optimizer, scheduler = init_opt(
@@ -153,18 +156,18 @@ def main(args, resume_preempt=False):
 
      # -- EMA momentum schedule (simple linear schedule)
     ema_start, ema_end = 0.996, 1.0
-    momentum_schedule = [
+    momentum_scheduler = [
         ema_start + (ema_end - ema_start) * (epoch / num_epochs) 
         for epoch in range(num_epochs)
     ]
 
+    print(f'Patch size: {patch_size}')
     # -- Initialize mask collator
-    mask_collator = MaskCollator(
-        cfgs_mask=cfgs_mask,
-        dataset_fpcs=dataset_fpcs,
-        crop_size=(crop_size, crop_size),
-        patch_size=(patch_size, patch_size),
-        tubelet_size=tubelet_size,
+    mask_generator = init_mask_generator(
+        input_size=input_size,
+        patch_size=patch_size_mask,
+        num_blocks=1,
+        masking_ratio=cfgs_mask.get("nenc", 0.5),  # Use first mask config for ratio
     )
 
     def save_checkpoint(epoch, path):
@@ -195,6 +198,7 @@ def main(args, resume_preempt=False):
     print(f"  - Mixed precision: {mixed_precision}")
 
     # -- SIMPLIFIED TRAINING LOOP
+    
     for epoch in range(num_epochs):
         encoder.train()
         predictor.train()
@@ -202,158 +206,88 @@ def main(args, resume_preempt=False):
         
         epoch_loss = 0.0
         num_batches = 0
+
+        print('Starting epoch:', epoch + 1)
         
         print(f"\nEpoch {epoch + 1}/{num_epochs}")
         
         for batch_idx, batch in enumerate(train_dataloader):
+            print('')
+            print(f'Batch index: {batch_idx}, Batch length: {len(batch)}')
 
-            print('batch: ', batch_idx)
-            print('batc')
+
+            state, next_state, action, reward = batch
+            clip = torch.cat((state, next_state), dim=2).to(device)
             
-            # Get batch data - assuming it comes from mask collator
-            if isinstance(batch, list):
-                # Handle multiple frame rates
-                all_loss = 0.0
-                batch_count = 0
-                
-                for fpc_batch in batch:
-                    if len(fpc_batch) == 3:
-                        udata, masks_enc, masks_pred = fpc_batch
-                        clips = udata[0].to(device)
-                        masks_enc = [m.to(device) for m in masks_enc]  
-                        masks_pred = [m.to(device) for m in masks_pred]
-                    else:
-                        clips = batch[0].to(device)
-                        # Simple random masking if no mask collator
-                        B, C, T, H, W = clips.shape
-                        num_patches = (T // tubelet_size) * (H // patch_size) * (W // patch_size)
-                        mask_ratio = 0.75
-                        num_masked = int(mask_ratio * num_patches)
-                        
-                        masks_enc = [torch.randperm(num_patches, device=device)[:num_patches-num_masked].unsqueeze(0).repeat(B, 1)]
-                        masks_pred = [torch.randperm(num_patches, device=device)[:num_masked].unsqueeze(0).repeat(B, 1)]
-                    
-                    # Forward pass
-                    optimizer.zero_grad()
-                    
-                    # Target encoder forward (no gradients)
+            print('clip shape:', clip.shape)
+            masks_enc = mask_generator(batch_size).to(device)  # Generate masks for encoder
+            print('masks_enc shape:', masks_enc.shape)
+            masks_pred =  ~masks_enc  # Using the inverse of masks_enc for prediction
+
+            def train_step():
+                def forward_target(c):
                     with torch.no_grad():
-                        target_features = target_encoder(clips)
-                        if not isinstance(target_features, list):
-                            target_features = [target_features]
-                        # Normalize target features
-                        target_features = [F.layer_norm(h, (h.size(-1),)) for h in target_features]
-                    
-                    # Context encoder + predictor forward
-                    context_features = encoder(clips, masks_enc)
-                    if not isinstance(context_features, list):
-                        context_features = [context_features]
-                    
-                    predicted_features = predictor(context_features, masks_enc, masks_pred)
-                    if not isinstance(predicted_features, list):
-                        predicted_features = [predicted_features]
-                    
-                    # Compute loss
-                    loss = 0.0
-                    loss_count = 0
-                    
-                    for pred_feats, target_feats, mask_pred in zip(predicted_features, target_features, masks_pred):
-                        # Apply prediction masks to target features
-                        if len(mask_pred.shape) == 2:  # [B, num_masked]
-                            target_masked = apply_masks(target_feats, [mask_pred], concat=False)[0]
-                        else:
-                            target_masked = target_feats
-                        
-                        # Compute L1 loss
-                        batch_loss = F.l1_loss(pred_feats, target_masked)
-                        loss += batch_loss
-                        loss_count += 1
-                    
-                    if loss_count > 0:
-                        loss = loss / loss_count
-                    
-                    # Backward pass
-                    loss.backward()
-                    optimizer.step()
-                    
-                    all_loss += loss.item()
-                    batch_count += 1
-                
-                if batch_count > 0:
-                    batch_loss = all_loss / batch_count
-                else:
-                    batch_loss = 0.0
-            else:
-                # Simple batch handling
-                clips = batch[0].to(device) if isinstance(batch, (list, tuple)) else batch.to(device)
-                
-                # Simple random masking
-                B, C, T, H, W = clips.shape
-                num_patches = (T // tubelet_size) * (H // patch_size) * (W // patch_size)
-                mask_ratio = 0.75
-                num_masked = int(mask_ratio * num_patches)
-                
-                masks_enc = [torch.randperm(num_patches, device=device)[:num_patches-num_masked].unsqueeze(0).repeat(B, 1)]
-                masks_pred = [torch.randperm(num_patches, device=device)[:num_masked].unsqueeze(0).repeat(B, 1)]
-                
-                # Forward pass
-                optimizer.zero_grad()
-                
-                # Target encoder forward (no gradients)
-                with torch.no_grad():
-                    target_features = target_encoder(clips)
-                    if not isinstance(target_features, list):
-                        target_features = [target_features]
-                    target_features = [F.layer_norm(h, (h.size(-1),)) for h in target_features]
-                
-                # Context encoder + predictor forward  
-                context_features = encoder(clips, masks_enc)
-                if not isinstance(context_features, list):
-                    context_features = [context_features]
-                
-                predicted_features = predictor(context_features, masks_enc, masks_pred)
-                if not isinstance(predicted_features, list):
-                    predicted_features = [predicted_features]
-                
-                # Compute loss
-                loss = 0.0
-                for pred_feats, target_feats, mask_pred in zip(predicted_features, target_features, masks_pred):
-                    target_masked = apply_masks(target_feats, [mask_pred], concat=False)[0]
-                    loss += F.l1_loss(pred_feats, target_masked)
-                
-                loss = loss / len(predicted_features)
-                
-                # Backward pass
+                        h = target_encoder(c)
+                        h = [F.layer_norm(hi, (hi.size(-1),)) for hi in h]
+                        return h
+
+                def forward_context(c):
+                    print('Encoding context...')
+                    z = encoder(c, masks_enc)
+                    print('')
+                    print('Predicting with context...')
+                    z = predictor(z, masks_enc, masks_pred)
+                    print('')
+                    return z
+
+                def loss_fn(z, h):
+                    # Assumption: predictor will have returned only masked tokens for z
+                    h = [apply_masks(hi, mi, concat=False) for hi, mi in zip(h, masks_pred)]
+
+                    loss, n = 0, 0
+                    for zi, hi in zip(z, h):
+                        for zij, hij in zip(zi, hi):
+                            loss += torch.mean(torch.abs(zij - hij))
+                            n += 1
+                    loss /= n
+                    return loss
+
+                # Step 1. Forward
+                print('Forwarding target')
+                h = forward_target(clip)
+                print('')
+                print('Forwarding context')
+                z = forward_context(clip)
+                loss = loss_fn(z, h)  # jepa prediction loss
+
+                # Step 2. Backward & step
                 loss.backward()
                 optimizer.step()
-                
-                batch_loss = loss.item()
-            
-            # EMA update of target encoder
-            momentum = momentum_schedule[epoch]
-            with torch.no_grad():
-                for param_q, param_k in zip(encoder.parameters(), target_encoder.parameters()):
-                    param_k.data.mul_(momentum).add_(param_q.data, alpha=1.0 - momentum)
-            
-            epoch_loss += batch_loss
+                optimizer.zero_grad()
+                _new_lr = scheduler.step()
+
+                # Step 3. momentum update of target encoder
+                m = next(momentum_scheduler)
+                with torch.no_grad():
+                    params_k = []
+                    params_q = []
+                    for param_q, param_k in zip(encoder.parameters(), target_encoder.parameters()):
+                        params_k.append(param_k)
+                        params_q.append(param_q)
+                    torch._foreach_mul_(params_k, m)
+                    torch._foreach_add_(params_k, params_q, alpha=1 - m)
+                print('-' * 20)
+
+                return float(loss)
+
+            # Run the training step
+            loss = train_step()
+            epoch_loss += loss
             num_batches += 1
-            
-            # Print progress
-            if batch_idx % 10 == 0:
-                print(f"  Batch {batch_idx}/{len(train_dataloader)}, Loss: {batch_loss:.4f}")
-            
-            # Step scheduler
-            scheduler.step()
-        
-        # Print epoch summary
-        avg_loss = epoch_loss / max(num_batches, 1)
-        print(f"Epoch {epoch + 1} completed. Average Loss: {avg_loss:.4f}")
-        
-        # Save checkpoint every 10 epochs
-        if (epoch + 1) % 10 == 0:
-            checkpoint_path = f"checkpoint_epoch_{epoch + 1}.pt"
-            save_checkpoint(epoch + 1, checkpoint_path)
-    
+            print(f"Batch {batch_idx + 1}/{len(train_dataloader)} - Loss: {loss:.4f}")
+
+        print(f"Epoch {epoch + 1}/{num_epochs} - Loss: {epoch_loss / num_batches if num_batches > 0 else 0:.4f}")
+
     print("Training completed!")
     
     # Save final checkpoint
@@ -371,36 +305,38 @@ def test_training_small():
             "dtype": "float32",
             "use_sdpa": False
         },
-        "mask": [
+        "mask":
             {
+                "input_size": (6, 64, 64),  # (frames, height, width)
+                "patch_size": (2, 8, 8),    # (temporal, spatial, spatial)
+                "masking_ratio": 0.5,
                 "enc_mask_scale": (0.2, 0.8),
                 "pred_mask_scale": (0.2, 0.8),
                 "aspect_ratio": (0.3, 3.0),
                 "nenc": 0.2,
                 "npred": 0.3
-            }
-        ],
+            },
         "model": {
             "model_name": "vit_tiny",
             "compile_model": False,
             "use_activation_checkpointing": False,
             "pred_depth": 2,
             "pred_num_heads": 4,
-            "pred_embed_dim": 192,
+            "pred_embed_dim": 16,
             "uniform_power": False,
             "use_mask_tokens": True,
             "zero_init_mask_tokens": True,
-            "use_rope": False,
+            "use_rope": True,
             "use_silu": False,
             "use_pred_silu": False,
             "wide_silu": False
         },
         "data": {
-            "batch_size": 2,
+            "batch_size": 32,
             "tubelet_size": 2,
             "crop_size": 64,
             "patch_size": 8,
-            "dataset_fpcs": [8]
+            "dataset_fpcs": [6]
         },
         "optimization": {
             "ipe": None,
@@ -413,14 +349,7 @@ def test_training_small():
         }
     }
     
-    # Run the test
-    try:
-        main(test_args, resume_preempt=False)
-        print("✓ Small parameter test completed successfully!")
-        return True
-    except Exception as e:
-        print(f"✗ Small parameter test failed: {e}")
-        return False
+    main(test_args, resume_preempt=False)
 
 
 if __name__ == "__main__":
