@@ -72,68 +72,83 @@ def init_opt(
     return optim, scheduler
 
 
-def init_video_model(
-    device,
-    patch_size=16,
-    max_num_frames=16,
-    tubelet_size=2,
-    model_name="vit_base",
-    crop_size=224,
-    pred_depth=6,
-    pred_num_heads=None,
-    pred_embed_dim=384,
-    uniform_power=False,
-    use_mask_tokens=False,
-    num_mask_tokens=2,
-    zero_init_mask_tokens=True,
-    use_sdpa=False,
-    use_rope=False,
-    use_silu=False,
-    use_pred_silu=False,
-    wide_silu=False,
-    use_activation_checkpointing=False,
-):
-    encoder = video_vit.__dict__[model_name](
-        img_size=crop_size,
-        patch_size=patch_size,
-        num_frames=max_num_frames,
-        tubelet_size=tubelet_size,
-        uniform_power=uniform_power,
-        use_sdpa=use_sdpa,
-        use_silu=use_silu,
-        wide_silu=wide_silu,
-        use_activation_checkpointing=use_activation_checkpointing,
-        use_rope=use_rope,
-    )
-    encoder = MultiSeqWrapper(encoder)
-    predictor = vit_pred.__dict__["vit_predictor"](
-        img_size=crop_size,
-        use_mask_tokens=use_mask_tokens,
-        patch_size=patch_size,
-        num_frames=max_num_frames,
-        tubelet_size=tubelet_size,
-        embed_dim=encoder.backbone.embed_dim,
-        predictor_embed_dim=pred_embed_dim,
-        depth=pred_depth,
-        num_heads=encoder.backbone.num_heads if pred_num_heads is None else pred_num_heads,
-        uniform_power=uniform_power,
-        num_mask_tokens=num_mask_tokens,
-        zero_init_mask_tokens=zero_init_mask_tokens,
-        use_rope=use_rope,
-        use_sdpa=use_sdpa,
-        use_silu=use_pred_silu,
-        wide_silu=wide_silu,
-        use_activation_checkpointing=use_activation_checkpointing,
-    )
-    predictor = PredictorMultiSeqWrapper(predictor)
-
-    encoder.to(device)
-    predictor.to(device)
-
-    def count_parameters(model):
-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    
-    print(f"Encoder parameters: {count_parameters(encoder)}")
-    print(f"Predictor parameters: {count_parameters(predictor)}")
-
+def init_video_model(  
+    device,  
+    patch_size=16,  
+    max_num_frames=16,  
+    tubelet_size=2,  
+    model_name="vit_base",  
+    crop_size=224,  
+    pred_depth=6,  
+    pred_num_heads=None,  
+    pred_embed_dim=384,  
+    uniform_power=False,  
+    use_mask_tokens=False,  
+    num_mask_tokens=2,  
+    zero_init_mask_tokens=True,  
+    use_sdpa=False,  
+    use_rope=False,  
+    use_silu=False,  
+    use_pred_silu=False,  
+    wide_silu=False,  
+    use_activation_checkpointing=False,  
+):  
+    print('[setups] Initialising video model with max_num_frames:', max_num_frames,)
+    encoder = video_vit.__dict__[model_name](  
+        img_size=crop_size,  
+        patch_size=patch_size,  
+        num_frames=max_num_frames,  
+        tubelet_size=tubelet_size,  
+        uniform_power=uniform_power,  
+        use_sdpa=use_sdpa,  
+        use_silu=use_silu,  
+        wide_silu=wide_silu,  
+        use_activation_checkpointing=use_activation_checkpointing,  
+        use_rope=use_rope,  
+    )  
+      
+    predictor = vit_pred.__dict__["vit_predictor"](  
+        img_size=crop_size,  
+        use_mask_tokens=use_mask_tokens,  
+        patch_size=patch_size,  
+        num_frames=max_num_frames,  
+        tubelet_size=tubelet_size,  
+        embed_dim=encoder.embed_dim,  # Remove .backbone  
+        predictor_embed_dim=pred_embed_dim,  
+        depth=pred_depth,  
+        num_heads=encoder.num_heads if pred_num_heads is None else pred_num_heads,  # Remove .backbone  
+        uniform_power=uniform_power,  
+        num_mask_tokens=num_mask_tokens,  
+        zero_init_mask_tokens=zero_init_mask_tokens,  
+        use_rope=use_rope,  
+        use_sdpa=use_sdpa,  
+        use_silu=use_pred_silu,  
+        wide_silu=wide_silu,  
+        use_activation_checkpointing=use_activation_checkpointing,  
+    )  
+  
+    encoder.to(device)  
+    predictor.to(device)  
+  
+    def count_parameters(model):  
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)  
+      
+    print(f"Encoder parameters: {count_parameters(encoder)}")  
+    print(f"Predictor parameters: {count_parameters(predictor)}")  
+  
     return encoder, predictor
+
+
+def init_mask_generator(
+    input_size,
+    patch_size,
+    num_blocks=1,
+    masking_ratio=0.5,
+):
+    from src.masks.multiseq_multiblock3d import MaskGenerator
+    return MaskGenerator(
+        input_size=input_size,
+        patch_size=patch_size,
+        num_blocks=num_blocks,
+        masking_ratio=masking_ratio,
+    )
