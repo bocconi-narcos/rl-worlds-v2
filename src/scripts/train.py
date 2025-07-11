@@ -156,10 +156,11 @@ def main(args, resume_preempt=False):
 
      # -- EMA momentum schedule (simple linear schedule)
     ema_start, ema_end = 0.996, 1.0
-    momentum_scheduler = [
-        ema_start + (ema_end - ema_start) * (epoch / num_epochs) 
-        for epoch in range(num_epochs)
-    ]
+    total_steps = num_epochs * len(train_dataloader)
+    momentum_scheduler = iter([
+        ema_start + (ema_end - ema_start) * (step / total_steps) 
+        for step in range(total_steps)
+    ])
 
     print(f'Patch size: {patch_size}')
     # -- Initialize mask collator
@@ -185,19 +186,6 @@ def main(args, resume_preempt=False):
             print(f"Checkpoint saved to {path}")
         except Exception as e:
             print(f"Error saving checkpoint: {e}")
-
-    print("Training setup completed. Starting training loop...")
-
-
-    print("Training setup completed. Ready for training loop implementation.")
-    print("Configuration summary:")
-    print(f"  - Device: {device}")
-    print(f"  - Batch size: {batch_size}")
-    print(f"  - Epochs: {num_epochs}")
-    print(f"  - Model: {model_name}")
-    print(f"  - Mixed precision: {mixed_precision}")
-
-    # -- SIMPLIFIED TRAINING LOOP
     
     for epoch in range(num_epochs):
         encoder.train()
@@ -206,65 +194,49 @@ def main(args, resume_preempt=False):
         
         epoch_loss = 0.0
         num_batches = 0
-
-        print('Starting epoch:', epoch + 1)
-        
-        print(f"\nEpoch {epoch + 1}/{num_epochs}")
         
         for batch_idx, batch in enumerate(train_dataloader):
-            print('')
-            print(f'Batch index: {batch_idx}, Batch length: {len(batch)}')
-
 
             state, next_state, action, reward = batch
             clip = torch.cat((state, next_state), dim=2).to(device)
             
-            print('clip shape:', clip.shape)
-            masks_enc = mask_generator(batch_size).to(device)  # Generate masks for encoder
-            print('masks_enc shape:', masks_enc.shape)
-            masks_pred =  ~masks_enc  # Using the inverse of masks_enc for prediction
+            masks_enc, masks_pred = mask_generator(batch_size)
+            masks_enc, masks_pred = masks_enc.to(device), masks_pred.to(device)
 
             def train_step():
                 def forward_target(c):
                     with torch.no_grad():
                         h = target_encoder(c)
-                        h = [F.layer_norm(hi, (hi.size(-1),)) for hi in h]
+                        h = F.layer_norm(h, (h.size(-1),))
                         return h
 
                 def forward_context(c):
-                    print('Encoding context...')
                     z = encoder(c, masks_enc)
-                    print('')
-                    print('Predicting with context...')
                     z = predictor(z, masks_enc, masks_pred)
-                    print('')
                     return z
 
                 def loss_fn(z, h):
                     # Assumption: predictor will have returned only masked tokens for z
-                    h = [apply_masks(hi, mi, concat=False) for hi, mi in zip(h, masks_pred)]
+                    h = apply_masks(h, masks_pred, concat=False)
 
                     loss, n = 0, 0
-                    for zi, hi in zip(z, h):
-                        for zij, hij in zip(zi, hi):
-                            loss += torch.mean(torch.abs(zij - hij))
-                            n += 1
+                    for zij, hij in zip(z, h):
+                        loss += torch.mean(torch.abs(zij - hij))
+                        n += 1
                     loss /= n
                     return loss
 
                 # Step 1. Forward
-                print('Forwarding target')
                 h = forward_target(clip)
-                print('')
-                print('Forwarding context')
                 z = forward_context(clip)
+
                 loss = loss_fn(z, h)  # jepa prediction loss
 
                 # Step 2. Backward & step
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
-                _new_lr = scheduler.step()
+                scheduler.step()
 
                 # Step 3. momentum update of target encoder
                 m = next(momentum_scheduler)
@@ -276,7 +248,6 @@ def main(args, resume_preempt=False):
                         params_q.append(param_q)
                     torch._foreach_mul_(params_k, m)
                     torch._foreach_add_(params_k, params_q, alpha=1 - m)
-                print('-' * 20)
 
                 return float(loss)
 
