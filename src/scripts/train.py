@@ -252,7 +252,7 @@ class VJEPATrainingPipeline:
         
         # Initialize mask generator
         input_size = (sequence_length, image_height, image_width)
-        patch_size_mask = (2, 16, 16)  # Default for masking
+        patch_size_mask = (tubelet_size, patch_size, patch_size)  # Default for masking
         masking_ratio = data_config.get("masking_ratio", 0.5)
         
         self.mask_generator = init_mask_generator(
