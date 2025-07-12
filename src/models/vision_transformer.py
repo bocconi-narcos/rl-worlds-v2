@@ -9,11 +9,11 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from src.masks.utils import apply_masks
-from src.models.utils.modules import Block
-from src.models.utils.patch_embed import PatchEmbed, PatchEmbed3D
-from src.models.utils.pos_embs import get_2d_sincos_pos_embed, get_3d_sincos_pos_embed
-from src.utils.fb_tensors import trunc_normal_
+from masks.utils import apply_masks
+from models.utils.modules import Block
+from models.utils.patch_embed import PatchEmbed, PatchEmbed3D
+from models.utils.pos_embs import get_2d_sincos_pos_embed, get_3d_sincos_pos_embed
+from utils.fb_tensors import trunc_normal_
 
 
 device = "cpu"
