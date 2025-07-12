@@ -1,7 +1,7 @@
 import torch
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
-import src.models.predictor_first_stage as vit_pred
-import src.models.vision_transformer as video_vit
+import models.predictor_first_stage as vit_pred
+import models.vision_transformer as video_vit
 
 def init_opt(
     encoder,
@@ -82,7 +82,7 @@ def init_video_model(
     pred_num_heads=None,  
     pred_embed_dim=384,  
     uniform_power=False,  
-    use_mask_tokens=False,  
+    use_mask_tokens=True,  
     num_mask_tokens=2,  
     zero_init_mask_tokens=True,  
     use_sdpa=False,  
@@ -99,7 +99,6 @@ def init_video_model(
         num_frames=max_num_frames,  
         tubelet_size=tubelet_size,  
         uniform_power=uniform_power,  
-        use_sdpa=use_sdpa,  
         use_silu=use_silu,  
         wide_silu=wide_silu,  
         use_activation_checkpointing=use_activation_checkpointing,  
@@ -120,7 +119,7 @@ def init_video_model(
         num_mask_tokens=num_mask_tokens,  
         zero_init_mask_tokens=zero_init_mask_tokens,  
         use_rope=use_rope,  
-        use_sdpa=use_sdpa,  
+        use_sdpa=False,  
         use_silu=use_pred_silu,  
         wide_silu=wide_silu,  
         use_activation_checkpointing=use_activation_checkpointing,  
@@ -144,7 +143,7 @@ def init_mask_generator(
     num_blocks=1,
     masking_ratio=0.5,
 ):
-    from src.masks.multiseq_multiblock3d import MaskGenerator
+    from masks.multiseq_multiblock3d import MaskGenerator
     return MaskGenerator(
         input_size=input_size,
         patch_size=patch_size,
