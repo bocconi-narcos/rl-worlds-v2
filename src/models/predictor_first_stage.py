@@ -9,10 +9,10 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-from src.masks.utils import apply_masks
-from src.models.utils.modules import Block
-from src.models.utils.pos_embs import get_2d_sincos_pos_embed, get_3d_sincos_pos_embed
-from src.utils.fb_tensors import repeat_interleave_batch, trunc_normal_
+from masks.utils import apply_masks
+from models.utils.modules import Block
+from models.utils.pos_embs import get_2d_sincos_pos_embed, get_3d_sincos_pos_embed
+from utils.fb_tensors import repeat_interleave_batch, trunc_normal_
 
 
 class VisionTransformerPredictor(nn.Module):
@@ -52,12 +52,14 @@ class VisionTransformerPredictor(nn.Module):
         self.return_all_tokens = return_all_tokens
         self.chop_last_n_tokens = chop_last_n_tokens
 
+        print('using num_mask_tokens:', num_mask_tokens)
+
         # Map input to predictor dimension
         self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
 
         # Mask tokens
         self.mask_tokens = None
-        self.num_mask_tokens = 0
+        self.num_mask_tokens = num_mask_tokens
         if use_mask_tokens:
             self.num_mask_tokens = num_mask_tokens
             self.mask_tokens = nn.ParameterList(
